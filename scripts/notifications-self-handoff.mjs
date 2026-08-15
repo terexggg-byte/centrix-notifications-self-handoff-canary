@@ -26,6 +26,22 @@ function positiveNumber(value, fallback, name) {
   return parsed;
 }
 
+function durationMs(env, { millisecondsName, minutesName, fallbackMs }) {
+  const minutes = String(env[minutesName] ?? "").trim();
+  if (minutes) {
+    return positiveNumber(minutes, null, minutesName) * 60_000;
+  }
+  return positiveNumber(env[millisecondsName], fallbackMs, millisecondsName);
+}
+
+function booleanValue(value, fallback = false) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  throw new Error("Boolean orchestration inputs must be true or false.");
+}
+
 function optionalHandoffCount(value) {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (!normalized || normalized === "unlimited") return null;
@@ -239,9 +255,21 @@ export async function runWorkerSession({
 } = {}) {
   const rcDir = path.resolve(required(env.CENTRIX_RC_DIR, "CENTRIX_RC_DIR"));
   const workerPath = path.join(rcDir, "scripts", "notifications-worker.mjs");
-  const handoffStartMs = positiveNumber(env.SELF_HANDOFF_START_MS, 285 * 60_000, "SELF_HANDOFF_START_MS");
-  const targetStopMs = positiveNumber(env.SELF_HANDOFF_TARGET_MS, 300 * 60_000, "SELF_HANDOFF_TARGET_MS");
-  const maximumStopMs = positiveNumber(env.SELF_HANDOFF_MAX_MS, 315 * 60_000, "SELF_HANDOFF_MAX_MS");
+  const handoffStartMs = durationMs(env, {
+    millisecondsName: "SELF_HANDOFF_START_MS",
+    minutesName: "SELF_HANDOFF_START_MINUTES",
+    fallbackMs: 285 * 60_000
+  });
+  const targetStopMs = durationMs(env, {
+    millisecondsName: "SELF_HANDOFF_TARGET_MS",
+    minutesName: "SELF_HANDOFF_TARGET_MINUTES",
+    fallbackMs: 300 * 60_000
+  });
+  const maximumStopMs = durationMs(env, {
+    millisecondsName: "SELF_HANDOFF_MAX_MS",
+    minutesName: "SELF_HANDOFF_MAX_MINUTES",
+    fallbackMs: 315 * 60_000
+  });
   const readinessTimeoutMs = positiveNumber(
     env.SELF_HANDOFF_READINESS_TIMEOUT_MS,
     25 * 60_000,
@@ -257,6 +285,12 @@ export async function runWorkerSession({
     throw new Error("Self-handoff timing must satisfy start < target < maximum.");
   }
   const handoffsRemaining = optionalHandoffCount(env.SELF_HANDOFF_REMAINING);
+  const injectCrash = booleanValue(env.SELF_HANDOFF_INJECT_CRASH, false);
+  const crashAfterRenewals = positiveNumber(
+    env.SELF_HANDOFF_CRASH_AFTER_RENEWALS,
+    3,
+    "SELF_HANDOFF_CRASH_AFTER_RENEWALS"
+  );
 
   const github = new GitHubActionsClient({
     token: env.GH_TOKEN,
@@ -277,6 +311,8 @@ export async function runWorkerSession({
   let leaderStartedAt = null;
   let hadLeadership = false;
   let superseded = false;
+  let successfulRenewals = 0;
+  let crashInjected = false;
   let initialStateResolve;
   let initialStateReject;
   const initialState = new Promise((resolve, reject) => {
@@ -293,6 +329,21 @@ export async function runWorkerSession({
         hadLeadership = true;
         leaderStartedAt = monotonicNow();
         initialStateResolve({ state: message.state });
+      }
+      if (message.reason === "renewed") {
+        successfulRenewals += 1;
+        log("canary.renewal_observed", { runId, successfulRenewals });
+        if (
+          injectCrash
+          && !crashInjected
+          && successfulRenewals >= crashAfterRenewals
+          && child.exitCode === null
+          && child.signalCode === null
+        ) {
+          crashInjected = true;
+          log("canary.controlled_crash", { runId, successfulRenewals });
+          child.kill("SIGKILL");
+        }
       }
       return;
     }
@@ -631,7 +682,8 @@ export async function runWatchdog({ env = process.env, fetchImpl = fetch } = {})
     workflowFile,
     ref: required(env.SELF_HANDOFF_WORKFLOW_REF, "SELF_HANDOFF_WORKFLOW_REF"),
     sessionId,
-    trigger: "watchdog"
+    trigger: "watchdog",
+    handoffsRemaining: optionalHandoffCount(env.WATCHDOG_HANDOFFS_REMAINING)
   });
   log("watchdog.dispatched", { runId: dispatched.runId, dbNow: snapshot.dbNow });
   return { action: "dispatch", reason: decision.reason, runId: dispatched.runId };
@@ -779,13 +831,36 @@ export async function runCanaryObserver({ env = process.env, sleepImpl = sleep }
   throw new Error("Canary observer timed out before proving two graceful lease owners and final zero leadership.");
 }
 
+export async function runCanaryPreflight({ env = process.env } = {}) {
+  const trafficNotBefore = required(
+    env.NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE,
+    "NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE"
+  );
+  if (trafficNotBefore !== "2099-01-01T00:00:00.000Z" && trafficNotBefore !== "2099-01-01T00:00:00Z") {
+    throw new Error("Canary traffic gate must remain fixed at 2099-01-01T00:00:00Z.");
+  }
+  const snapshot = await readCanaryObserverSnapshot({ env });
+  for (const [name, value] of [
+    ["active leaders", snapshot.activeLeaders],
+    ["PROCESSING", snapshot.processing],
+    ["QUEUED", snapshot.queued],
+    ["NotificationJob", snapshot.jobs],
+    ["WhatsAppAuthState", snapshot.authStates]
+  ]) {
+    if (Number(value) !== 0) throw new Error(`Canary preflight requires zero ${name}; observed ${value}.`);
+  }
+  log("canary.preflight_passed", { dbNow: snapshot.dbNow, trafficNotBefore });
+  return { passed: true, dbNow: snapshot.dbNow };
+}
+
 async function main() {
   const command = process.argv[2];
   if (command === "session") return runWorkerSession();
   if (command === "gate") return runLeaseGate();
   if (command === "watchdog") return runWatchdog();
   if (command === "observer") return runCanaryObserver();
-  throw new Error("Usage: notifications-self-handoff.mjs <session|gate|watchdog|observer>");
+  if (command === "canary-preflight") return runCanaryPreflight();
+  throw new Error("Usage: notifications-self-handoff.mjs <session|gate|watchdog|observer|canary-preflight>");
 }
 
 const isEntrypoint = process.argv[1]
