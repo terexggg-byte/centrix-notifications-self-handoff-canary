@@ -1,0 +1,35 @@
+name: Notifications Worker Self-Handoff Session
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger:
+        description: Registration stub only; the Canary branch contains the executable workflow
+        required: true
+        default: manual
+        type: choice
+        options:
+          - manual
+          - bootstrap
+          - handoff
+          - watchdog
+      session_id:
+        required: false
+        type: string
+      predecessor_run_id:
+        required: false
+        type: string
+      handoffs_remaining:
+        required: false
+        default: unlimited
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  registration-only:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Dispatch this workflow using the pinned Canary branch."

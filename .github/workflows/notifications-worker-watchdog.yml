@@ -1,0 +1,14 @@
+name: Notifications Worker Watchdog
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registration-only:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "The isolated Canary watchdog is intentionally unarmed."
