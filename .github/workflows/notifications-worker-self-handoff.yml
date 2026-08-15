@@ -1,10 +1,12 @@
-name: Notifications Worker Self-Handoff Session
+name: Notifications Emergency Recovery Session
+
+run-name: Notifications session / ${{ inputs.trigger || 'manual' }} / ${{ inputs.session_id || github.run_id }}
 
 on:
   workflow_dispatch:
     inputs:
       trigger:
-        description: Registration stub only; the Canary branch contains the executable workflow
+        description: Orchestration trigger only; PostgreSQL remains the leadership authority
         required: true
         default: manual
         type: choice
@@ -14,22 +16,113 @@ on:
           - handoff
           - watchdog
       session_id:
+        description: Unique orchestration session identifier
         required: false
         type: string
       predecessor_run_id:
+        description: Predecessor GitHub run identifier for traceability only
         required: false
         type: string
       handoffs_remaining:
+        description: Number of remaining handoffs, or unlimited for emergency recovery
         required: false
         default: unlimited
         type: string
 
 permissions:
+  actions: write
   contents: read
 
 jobs:
-  registration-only:
-    if: ${{ false }}
+  worker-session:
+    name: Run immutable Centrix notifications worker session
     runs-on: ubuntu-latest
+    timeout-minutes: 350
+    environment: production-emergency
+    env:
+      RELEASE_SHA: 2c920190719a4d6634ecfdc809817d5905d1a2d7
+      CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
+      GH_TOKEN: ${{ github.token }}
+      SELF_HANDOFF_WORKFLOW_FILE: notifications-worker-self-handoff.yml
+      SELF_HANDOFF_WORKFLOW_REF: ${{ github.ref_name }}
+      SELF_HANDOFF_ORCHESTRATOR_SHA: ${{ github.sha }}
+      SELF_HANDOFF_REMAINING: ${{ inputs.handoffs_remaining || 'unlimited' }}
+      SELF_HANDOFF_START_MS: "17100000"
+      SELF_HANDOFF_TARGET_MS: "18000000"
+      SELF_HANDOFF_MAX_MS: "18900000"
+      SELF_HANDOFF_READINESS_TIMEOUT_MS: "1500000"
+      SELF_HANDOFF_GATE_TIMEOUT_MS: "1500000"
+      SELF_HANDOFF_GRACEFUL_TIMEOUT_MS: "300000"
+      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      WHATSAPP_AUTH_ENCRYPTION_KEY: ${{ secrets.PRODUCTION_WHATSAPP_AUTH_ENCRYPTION_KEY }}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PUBLIC_KEY }}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PRIVATE_KEY }}
+      WEB_PUSH_VAPID_SUBJECT: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_SUBJECT }}
+      DATA_SOURCE: prisma
+      NODE_ENV: production
+      NOTIFICATIONS_WORKER_LOG_LEVEL: info
+      NOTIFICATIONS_WORKER_HA_ENABLED: "true"
+      NOTIFICATIONS_WORKER_ROLE: primary
+      NOTIFICATIONS_WORKER_INSTANCE_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+      NOTIFICATIONS_WORKER_INSTANCE_LABEL: github-actions
+      NOTIFICATIONS_WORKER_PREFERRED_LABEL: github-actions
+      NOTIFICATIONS_WORKER_PREFERRED_PREEMPTION_ENABLED: "false"
+      NOTIFICATIONS_WORKER_STANDBY_ONLY: "false"
+      NOTIFICATIONS_WORKER_LEASE_TTL_MS: "45000"
+      NOTIFICATIONS_WORKER_LEASE_RENEW_MS: "10000"
+      NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE: ${{ vars.PRODUCTION_EMERGENCY_TRAFFIC_NOT_BEFORE }}
+      CARD_EXPORT_WORKER_ENABLED: "false"
+
     steps:
-      - run: echo "Dispatch this workflow using the pinned Canary branch."
+      - name: Checkout orchestration repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check required configuration
+        shell: bash
+        run: |
+          test -n "$DATABASE_URL"
+          test -n "$WHATSAPP_AUTH_ENCRYPTION_KEY"
+          test -n "$WEB_PUSH_VAPID_PUBLIC_KEY"
+          test -n "$WEB_PUSH_VAPID_PRIVATE_KEY"
+          test -n "$WEB_PUSH_VAPID_SUBJECT"
+          test -n "$NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE"
+
+      - name: Checkout immutable Centrix RC
+        uses: actions/checkout@v4
+        with:
+          repository: terexggg-byte/center-management-system-prod
+          ref: 2c920190719a4d6634ecfdc809817d5905d1a2d7
+          ssh-key: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
+          persist-credentials: false
+          path: centrix-rc
+
+      - name: Verify immutable Centrix release
+        shell: bash
+        run: test "$(git -C "$CENTRIX_RC_DIR" rev-parse HEAD)" = "$RELEASE_SHA"
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.20.2"
+          cache: npm
+          cache-dependency-path: centrix-rc/package-lock.json
+
+      - name: Install immutable release dependencies
+        working-directory: centrix-rc
+        run: npm ci
+
+      - name: Test worker runtime
+        working-directory: centrix-rc
+        run: npm run test:notifications-worker
+
+      - name: Generate Prisma client
+        working-directory: centrix-rc
+        run: npm run prisma:generate
+
+      - name: Wait for predecessor lease expiration
+        run: node scripts/notifications-self-handoff.mjs gate
+
+      - name: Run self-handoff worker session
+        run: node scripts/notifications-self-handoff.mjs session
