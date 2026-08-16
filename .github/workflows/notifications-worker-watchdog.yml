@@ -34,7 +34,7 @@ jobs:
       - name: Checkout orchestration repository
         uses: actions/checkout@v4
         with:
-          ref: codex/notifications-emergency-recovery
+          ref: codex/notifications-production-recovery
           persist-credentials: false
 
       - name: Check required configuration
