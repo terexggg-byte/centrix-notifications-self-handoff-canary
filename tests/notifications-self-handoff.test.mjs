@@ -172,6 +172,7 @@ test("a leader dispatches one successor and shuts down gracefully only after orc
     assert.equal(fixture.requests.filter((request) => request.method === "POST").length, 1);
     const dispatchBody = JSON.parse(fixture.requests.find((request) => request.method === "POST").body);
     assert.equal(dispatchBody.inputs.handoffs_remaining, "0");
+    assert.equal(dispatchBody.return_run_details, true);
   } finally {
     await rm(rcDir, { recursive: true, force: true });
   }
@@ -429,9 +430,17 @@ test("the workflow keeps the immutable RC and places the PostgreSQL gate before 
   assert.match(workflow, /graceful_shutdown_after_minutes:/);
   assert.match(workflow, /max_runtime_minutes:/);
   assert.match(workflow, /inject_crash:/);
+  assert.match(workflow, /inject_db_failure:/);
+  assert.match(workflow, /inject_github_api_failure:/);
   assert.doesNotMatch(workflow, /PRODUCTION_/);
   assert.match(workflow, /CARD_EXPORT_WORKER_ENABLED: "false"/);
   assert.doesNotMatch(workflow, /secrets\.DATABASE_URL/);
+  const observerJobEnv = workflow.slice(
+    workflow.indexOf("  canary-observer:"),
+    workflow.indexOf("    steps:", workflow.indexOf("  canary-observer:"))
+  );
+  assert.doesNotMatch(observerJobEnv, /runner\.temp/);
+  assert.match(workflow, /SELF_HANDOFF_OBSERVER_OUTPUT: \$\{\{ runner\.temp \}\}/);
 
   const controller = await readFile(
     new URL("../scripts/notifications-self-handoff.mjs", import.meta.url),

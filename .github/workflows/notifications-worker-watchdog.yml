@@ -2,6 +2,12 @@ name: Notifications Canary Recovery Watchdog
 
 on:
   workflow_dispatch:
+    inputs:
+      observe_recovery:
+        description: Canary-only observer for one watchdog-dispatched recovery owner
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   actions: write
@@ -51,3 +57,22 @@ jobs:
 
       - name: Evaluate PostgreSQL lease and recover if required
         run: node scripts/notifications-self-handoff.mjs watchdog
+
+      - name: Observe watchdog recovery lease
+        if: ${{ inputs.observe_recovery }}
+        env:
+          SELF_HANDOFF_OBSERVER_OUTPUT: ${{ runner.temp }}/notifications-watchdog-recovery.jsonl
+          SELF_HANDOFF_OBSERVER_EXPECTED_OWNERS: "1"
+          SELF_HANDOFF_OBSERVER_EXPECTED_HEARTBEATS: "3"
+          SELF_HANDOFF_OBSERVER_POLL_MS: "2000"
+          SELF_HANDOFF_OBSERVER_TIMEOUT_MS: "900000"
+        run: node scripts/notifications-self-handoff.mjs observer
+
+      - name: Upload watchdog recovery evidence
+        if: ${{ always() && inputs.observe_recovery }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: notifications-watchdog-recovery-${{ github.run_id }}
+          path: ${{ runner.temp }}/notifications-watchdog-recovery.jsonl
+          if-no-files-found: error
+          retention-days: 7

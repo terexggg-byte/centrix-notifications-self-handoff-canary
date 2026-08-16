@@ -48,6 +48,26 @@ on:
         required: false
         default: false
         type: boolean
+      inject_db_failure:
+        description: Canary-only unreachable PostgreSQL proof; no worker is started
+        required: false
+        default: false
+        type: boolean
+      inject_github_api_failure:
+        description: Canary-only unreachable GitHub API during handoff
+        required: false
+        default: false
+        type: boolean
+      observer_expected_owners:
+        description: Canary-only number of lease owners the observer must prove
+        required: false
+        default: 2
+        type: number
+      observer_expected_heartbeats:
+        description: Canary-only heartbeat samples required for every owner
+        required: false
+        default: 4
+        type: number
       crash_after_renewals:
         description: Number of successful PostgreSQL renewals before the controlled crash
         required: false
@@ -160,27 +180,43 @@ jobs:
           psql --version
 
       - name: Verify isolated Canary preflight
+        if: ${{ !inputs.inject_db_failure }}
         run: node scripts/notifications-self-handoff.mjs canary-preflight
 
+      - name: Prove PostgreSQL outage fails closed
+        if: ${{ inputs.inject_db_failure }}
+        env:
+          DATABASE_URL: postgresql://canary-invalid@127.0.0.1:9/canary?connect_timeout=1
+        shell: bash
+        run: |
+          if node scripts/notifications-self-handoff.mjs canary-preflight; then
+            echo "Canary DB failure injection unexpectedly reached PostgreSQL." >&2
+            exit 1
+          fi
+          echo '{"event":"canary.db_failure_fail_closed","passed":true}'
+
       - name: Wait for predecessor lease expiration
+        if: ${{ !inputs.inject_db_failure }}
         run: node scripts/notifications-self-handoff.mjs gate
 
       - name: Run self-handoff worker session
+        if: ${{ !inputs.inject_db_failure }}
+        env:
+          GITHUB_API_URL: ${{ inputs.inject_github_api_failure && 'https://127.0.0.1:9' || github.api_url }}
         run: node scripts/notifications-self-handoff.mjs session
 
   canary-observer:
     name: Observe PostgreSQL lease transitions without granting leadership
-    if: inputs.trigger == 'manual'
+    if: inputs.trigger == 'manual' && !inputs.inject_db_failure
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       RELEASE_SHA: 2c920190719a4d6634ecfdc809817d5905d1a2d7
       DATABASE_URL: ${{ secrets.CANARY_DATABASE_URL }}
-      SELF_HANDOFF_OBSERVER_OUTPUT: ${{ runner.temp }}/notifications-self-handoff-canary.jsonl
       SELF_HANDOFF_OBSERVER_POLL_MS: "2000"
       SELF_HANDOFF_OBSERVER_TIMEOUT_MS: "1500000"
-      SELF_HANDOFF_OBSERVER_EXPECTED_OWNERS: "2"
-      SELF_HANDOFF_OBSERVER_EXPECTED_HEARTBEATS: "4"
+      SELF_HANDOFF_OBSERVER_EXPECTED_OWNERS: ${{ inputs.observer_expected_owners }}
+      SELF_HANDOFF_OBSERVER_EXPECTED_HEARTBEATS: ${{ inputs.observer_expected_heartbeats }}
 
     steps:
       - name: Checkout orchestration repository
@@ -198,6 +234,8 @@ jobs:
           psql --version
 
       - name: Observe PostgreSQL server-time leadership
+        env:
+          SELF_HANDOFF_OBSERVER_OUTPUT: ${{ runner.temp }}/notifications-self-handoff-canary.jsonl
         run: node scripts/notifications-self-handoff.mjs observer
 
       - name: Upload Canary evidence
