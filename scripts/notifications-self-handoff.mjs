@@ -132,7 +132,8 @@ export class GitHubActionsClient {
         method: "POST",
         body: {
           ref,
-          inputs
+          inputs,
+          return_run_details: true
         }
       }
     );

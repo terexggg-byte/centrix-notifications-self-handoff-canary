@@ -27,7 +27,7 @@ jobs:
       NOTIFICATIONS_WORKER_LEASE_ID: notifications-worker
       NOTIFICATIONS_WORKER_INSTANCE_LABEL: github-actions
       SELF_HANDOFF_WORKFLOW_FILE: notifications-worker-self-handoff.yml
-      SELF_HANDOFF_WORKFLOW_REF: codex/notifications-emergency-recovery
+      SELF_HANDOFF_WORKFLOW_REF: codex/notifications-production-recovery
       WATCHDOG_CANDIDATE_FRESHNESS_MS: "1200000"
 
     steps:

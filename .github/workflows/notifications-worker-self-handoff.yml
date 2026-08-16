@@ -44,7 +44,7 @@ jobs:
       CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
       GH_TOKEN: ${{ github.token }}
       SELF_HANDOFF_WORKFLOW_FILE: notifications-worker-self-handoff.yml
-      SELF_HANDOFF_WORKFLOW_REF: ${{ github.ref_name }}
+      SELF_HANDOFF_WORKFLOW_REF: codex/notifications-production-recovery
       SELF_HANDOFF_ORCHESTRATOR_SHA: ${{ github.sha }}
       SELF_HANDOFF_REMAINING: ${{ inputs.handoffs_remaining || 'unlimited' }}
       SELF_HANDOFF_START_MS: "17100000"
@@ -80,6 +80,8 @@ jobs:
           persist-credentials: false
 
       - name: Check required configuration
+        env:
+          CENTER_MANAGEMENT_RC_DEPLOY_KEY: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
         shell: bash
         run: |
           test -n "$DATABASE_URL"
@@ -88,6 +90,7 @@ jobs:
           test -n "$WEB_PUSH_VAPID_PRIVATE_KEY"
           test -n "$WEB_PUSH_VAPID_SUBJECT"
           test -n "$NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE"
+          test -n "$CENTER_MANAGEMENT_RC_DEPLOY_KEY"
 
       - name: Checkout immutable Centrix RC
         uses: actions/checkout@v4
