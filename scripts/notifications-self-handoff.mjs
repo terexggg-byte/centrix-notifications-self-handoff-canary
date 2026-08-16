@@ -296,7 +296,7 @@ export async function runWorkerSession({
   const github = new GitHubActionsClient({
     token: env.GH_TOKEN,
     repository: env.GITHUB_REPOSITORY,
-    apiUrl: env.GITHUB_API_URL,
+    apiUrl: env.SELF_HANDOFF_GITHUB_API_URL || env.GITHUB_API_URL,
     fetchImpl
   });
   const workflowFile = required(env.SELF_HANDOFF_WORKFLOW_FILE, "SELF_HANDOFF_WORKFLOW_FILE");
@@ -657,7 +657,7 @@ export async function runWatchdog({ env = process.env, fetchImpl = fetch } = {})
   const github = new GitHubActionsClient({
     token: env.GH_TOKEN,
     repository: env.GITHUB_REPOSITORY,
-    apiUrl: env.GITHUB_API_URL,
+    apiUrl: env.SELF_HANDOFF_GITHUB_API_URL || env.GITHUB_API_URL,
     fetchImpl
   });
   const workflowFile = required(env.SELF_HANDOFF_WORKFLOW_FILE, "SELF_HANDOFF_WORKFLOW_FILE");

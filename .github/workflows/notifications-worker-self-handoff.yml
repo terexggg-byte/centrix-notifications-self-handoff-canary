@@ -203,7 +203,7 @@ jobs:
       - name: Run self-handoff worker session
         if: ${{ !inputs.inject_db_failure }}
         env:
-          GITHUB_API_URL: ${{ inputs.inject_github_api_failure && 'https://127.0.0.1:9' || github.api_url }}
+          SELF_HANDOFF_GITHUB_API_URL: ${{ inputs.inject_github_api_failure && 'https://127.0.0.1:9' || github.api_url }}
         run: node scripts/notifications-self-handoff.mjs session
 
   canary-observer:
