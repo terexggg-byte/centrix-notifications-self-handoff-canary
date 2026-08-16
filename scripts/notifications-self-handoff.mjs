@@ -842,7 +842,6 @@ export async function runCanaryPreflight({ env = process.env } = {}) {
   }
   const snapshot = await readCanaryObserverSnapshot({ env });
   for (const [name, value] of [
-    ["active leaders", snapshot.activeLeaders],
     ["PROCESSING", snapshot.processing],
     ["QUEUED", snapshot.queued],
     ["NotificationJob", snapshot.jobs],
@@ -850,7 +849,27 @@ export async function runCanaryPreflight({ env = process.env } = {}) {
   ]) {
     if (Number(value) !== 0) throw new Error(`Canary preflight requires zero ${name}; observed ${value}.`);
   }
-  log("canary.preflight_passed", { dbNow: snapshot.dbNow, trafficNotBefore });
+  const allowActivePredecessor = booleanValue(env.CANARY_ALLOW_ACTIVE_PREDECESSOR, false);
+  const activeLeaders = Number(snapshot.activeLeaders || 0);
+  if (activeLeaders > (allowActivePredecessor ? 1 : 0)) {
+    throw new Error(`Canary preflight observed ${activeLeaders} active leaders.`);
+  }
+  if (activeLeaders === 1) {
+    if (!allowActivePredecessor) throw new Error("Canary bootstrap preflight requires zero active leaders.");
+    if (snapshot.ownerLabel !== "github-actions") {
+      throw new Error("Canary handoff predecessor owner label mismatch.");
+    }
+    if (snapshot.release !== required(env.RELEASE_SHA || DEFAULT_RELEASE_SHA, "RELEASE_SHA")) {
+      throw new Error("Canary handoff predecessor release SHA mismatch.");
+    }
+    if (snapshot.trafficActive) throw new Error("Canary handoff predecessor reported trafficActive=true.");
+  }
+  log("canary.preflight_passed", {
+    dbNow: snapshot.dbNow,
+    trafficNotBefore,
+    activeLeaders,
+    allowActivePredecessor
+  });
   return { passed: true, dbNow: snapshot.dbNow };
 }
 

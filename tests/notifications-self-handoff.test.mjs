@@ -432,6 +432,7 @@ test("the workflow keeps the immutable RC and places the PostgreSQL gate before 
   assert.match(workflow, /inject_crash:/);
   assert.match(workflow, /inject_db_failure:/);
   assert.match(workflow, /inject_github_api_failure:/);
+  assert.match(workflow, /CANARY_ALLOW_ACTIVE_PREDECESSOR: \$\{\{ inputs\.trigger == 'handoff' \}\}/);
   assert.doesNotMatch(workflow, /PRODUCTION_/);
   assert.match(workflow, /CARD_EXPORT_WORKER_ENABLED: "false"/);
   assert.doesNotMatch(workflow, /secrets\.DATABASE_URL/);

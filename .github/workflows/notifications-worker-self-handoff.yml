@@ -99,6 +99,7 @@ jobs:
       SELF_HANDOFF_GRACEFUL_TIMEOUT_MS: "300000"
       SELF_HANDOFF_INJECT_CRASH: ${{ inputs.inject_crash }}
       SELF_HANDOFF_CRASH_AFTER_RENEWALS: ${{ inputs.crash_after_renewals }}
+      CANARY_ALLOW_ACTIVE_PREDECESSOR: ${{ inputs.trigger == 'handoff' }}
       DATABASE_URL: ${{ secrets.CANARY_DATABASE_URL }}
       WHATSAPP_AUTH_ENCRYPTION_KEY: ${{ secrets.CANARY_WHATSAPP_AUTH_ENCRYPTION_KEY }}
       WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.CANARY_WEB_PUSH_VAPID_PUBLIC_KEY }}
