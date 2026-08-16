@@ -2,6 +2,15 @@ name: Notifications Emergency Recovery Watchdog
 
 on:
   workflow_dispatch:
+    inputs:
+      trigger:
+        description: Orchestration trigger only; PostgreSQL remains the leadership authority
+        required: false
+        default: manual
+        type: choice
+        options:
+          - manual
+          - schedule
   schedule:
     - cron: "7,22,37,52 * * * *"
 
@@ -14,8 +23,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  dispatch-scheduled-watchdog:
+    if: github.event_name == 'schedule' && vars.PRODUCTION_EMERGENCY_WATCHDOG_ARMED == 'true'
+    name: Dispatch protected-branch watchdog evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch watchdog on the approved Recovery branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run notifications-worker-watchdog.yml
+          --repo "${{ github.repository }}"
+          --ref codex/notifications-production-recovery
+          -f trigger=schedule
+
   watchdog:
-    if: vars.PRODUCTION_EMERGENCY_WATCHDOG_ARMED == 'true'
+    if: github.event_name == 'workflow_dispatch' && vars.PRODUCTION_EMERGENCY_WATCHDOG_ARMED == 'true'
     name: Recover a missing notifications worker session
     runs-on: ubuntu-latest
     timeout-minutes: 10
