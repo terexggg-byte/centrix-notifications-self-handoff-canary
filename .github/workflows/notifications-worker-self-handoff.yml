@@ -53,6 +53,11 @@ on:
         required: false
         default: false
         type: boolean
+      real_provider_release_gate:
+        description: QA-only real Web Push gate on the pinned disposable Neon branch
+        required: false
+        default: false
+        type: boolean
       inject_crash:
         description: Canary-only controlled crash after the configured renewals
         required: false
@@ -131,6 +136,7 @@ jobs:
       NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE: ${{ inputs.traffic_not_before }}
       CENTRIX_PUSH_QA_TIMING_ENABLED: "true"
       CARD_EXPORT_WORKER_ENABLED: "false"
+      RELEASE_GATE_NEON_BRANCH_ID: br-damp-frog-axi2djzn
 
     steps:
       - name: Checkout orchestration repository
@@ -198,8 +204,22 @@ jobs:
           psql --version
 
       - name: Verify isolated Canary preflight
-        if: ${{ !inputs.inject_db_failure }}
+        if: ${{ !inputs.inject_db_failure && !inputs.real_provider_release_gate }}
         run: node scripts/notifications-self-handoff.mjs canary-preflight
+
+      - name: Verify real-provider Release Gate isolation
+        if: ${{ !inputs.inject_db_failure && inputs.real_provider_release_gate }}
+        shell: bash
+        run: |
+          branch_id="$(psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc "SELECT current_setting('neon.branch_id', true)")"
+          test "$branch_id" = "$RELEASE_GATE_NEON_BRANCH_ID"
+          active_leaders="$(psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM \"NotificationWorkerLease\" WHERE id = 'notifications-worker-parent-push-qa' AND \"expiresAt\" > transaction_timestamp()")"
+          processing="$(psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM \"NotificationDelivery\" WHERE status = 'PROCESSING'")"
+          subscriptions="$(psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM \"ParentPortalPushSubscription\" WHERE \"disabledAt\" IS NULL")"
+          test "$active_leaders" = "0"
+          test "$processing" = "0"
+          test "$subscriptions" = "1"
+          echo '{"event":"qa.real_provider_preflight","passed":true,"activeLeaders":0,"processing":0,"subscriptions":1}'
 
       - name: Prove PostgreSQL outage fails closed
         if: ${{ inputs.inject_db_failure }}
@@ -225,7 +245,7 @@ jobs:
 
   canary-observer:
     name: Observe PostgreSQL lease transitions without granting leadership
-    if: inputs.trigger == 'manual' && !inputs.inject_db_failure
+    if: inputs.trigger == 'manual' && !inputs.inject_db_failure && !inputs.real_provider_release_gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
