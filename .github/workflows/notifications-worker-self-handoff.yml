@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
-      RELEASE_SHA: 9770d60fa1285828fd4dc6c8df73b773fdf94b43
+      RELEASE_SHA: e84d34e6ccf16b598a8c51e774d04f595ca9650e
       CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
       GH_TOKEN: ${{ github.token }}
       SELF_HANDOFF_WORKFLOW_FILE: notifications-worker-self-handoff.yml
@@ -144,7 +144,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: terexggg-byte/center-management-system-prod
-          ref: 9770d60fa1285828fd4dc6c8df73b773fdf94b43
+          ref: e84d34e6ccf16b598a8c51e774d04f595ca9650e
           ssh-key: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
           persist-credentials: false
           path: centrix-rc
@@ -217,7 +217,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RELEASE_SHA: 9770d60fa1285828fd4dc6c8df73b773fdf94b43
+      RELEASE_SHA: e84d34e6ccf16b598a8c51e774d04f595ca9650e
       DATABASE_URL: ${{ secrets.CANARY_DATABASE_URL }}
       SELF_HANDOFF_OBSERVER_LEASE_ID: notifications-worker-parent-push-qa
       SELF_HANDOFF_OBSERVER_POLL_MS: "2000"
