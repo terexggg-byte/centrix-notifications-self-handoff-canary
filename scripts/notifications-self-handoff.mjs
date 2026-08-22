@@ -11,7 +11,7 @@ import { performance } from "node:perf_hooks";
 const WORKER_STATUS_MESSAGE_TYPE = "centrix.notifications-worker.status.v1";
 const LEADER_STATES = new Set(["leader", "leader-held"]);
 const ACTIVE_RUN_STATES = new Set(["queued", "in_progress", "pending", "waiting", "requested"]);
-const DEFAULT_RELEASE_SHA = "2c920190719a4d6634ecfdc809817d5905d1a2d7";
+const DEFAULT_RELEASE_SHA = "4a61fc42ca0128278796833fd0fe8492e13b4f67";
 const DEFAULT_GATE_STEP = "Wait for predecessor lease expiration";
 
 function log(event, details = {}) {

@@ -23,13 +23,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      RELEASE_SHA: 2c920190719a4d6634ecfdc809817d5905d1a2d7
+      RELEASE_SHA: 4a61fc42ca0128278796833fd0fe8492e13b4f67
       GH_TOKEN: ${{ github.token }}
       DATABASE_URL: ${{ secrets.CANARY_DATABASE_URL }}
-      NOTIFICATIONS_WORKER_LEASE_ID: notifications-worker
+      NOTIFICATIONS_WORKER_LEASE_ID: notifications-worker-parent-push-qa
       NOTIFICATIONS_WORKER_INSTANCE_LABEL: github-actions
       SELF_HANDOFF_WORKFLOW_FILE: notifications-worker-self-handoff.yml
-      SELF_HANDOFF_WORKFLOW_REF: codex/notifications-emergency-recovery
+      SELF_HANDOFF_WORKFLOW_REF: codex/parent-push-reliability-qa
       WATCHDOG_CANDIDATE_FRESHNESS_MS: "30000"
       WATCHDOG_HANDOFFS_REMAINING: "0"
 
@@ -37,7 +37,7 @@ jobs:
       - name: Checkout orchestration repository
         uses: actions/checkout@v4
         with:
-          ref: codex/notifications-emergency-recovery
+          ref: codex/parent-push-reliability-qa
           persist-credentials: false
 
       - name: Check required configuration
@@ -62,6 +62,7 @@ jobs:
         if: ${{ inputs.observe_recovery }}
         env:
           SELF_HANDOFF_OBSERVER_OUTPUT: ${{ runner.temp }}/notifications-watchdog-recovery.jsonl
+          SELF_HANDOFF_OBSERVER_LEASE_ID: notifications-worker-parent-push-qa
           SELF_HANDOFF_OBSERVER_EXPECTED_OWNERS: "1"
           SELF_HANDOFF_OBSERVER_EXPECTED_HEARTBEATS: "3"
           SELF_HANDOFF_OBSERVER_POLL_MS: "2000"

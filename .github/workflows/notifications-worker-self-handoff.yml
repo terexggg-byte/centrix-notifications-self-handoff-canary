@@ -24,9 +24,9 @@ on:
         required: false
         type: string
       handoffs_remaining:
-        description: Number of remaining handoffs, or unlimited for emergency recovery
+        description: Number of remaining finite QA handoffs
         required: false
-        default: unlimited
+        default: "1"
         type: string
       handoff_prepare_after_minutes:
         description: Canary-only delay before preparing the successor
@@ -84,13 +84,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
-      RELEASE_SHA: 2c920190719a4d6634ecfdc809817d5905d1a2d7
+      RELEASE_SHA: 4a61fc42ca0128278796833fd0fe8492e13b4f67
       CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
       GH_TOKEN: ${{ github.token }}
       SELF_HANDOFF_WORKFLOW_FILE: notifications-worker-self-handoff.yml
       SELF_HANDOFF_WORKFLOW_REF: ${{ github.ref_name }}
       SELF_HANDOFF_ORCHESTRATOR_SHA: ${{ github.sha }}
-      SELF_HANDOFF_REMAINING: ${{ inputs.handoffs_remaining || 'unlimited' }}
+      SELF_HANDOFF_REMAINING: ${{ inputs.handoffs_remaining || '1' }}
       SELF_HANDOFF_START_MINUTES: ${{ inputs.handoff_prepare_after_minutes }}
       SELF_HANDOFF_TARGET_MINUTES: ${{ inputs.graceful_shutdown_after_minutes }}
       SELF_HANDOFF_MAX_MINUTES: ${{ inputs.max_runtime_minutes }}
@@ -115,6 +115,7 @@ jobs:
       NOTIFICATIONS_WORKER_PREFERRED_LABEL: github-actions
       NOTIFICATIONS_WORKER_PREFERRED_PREEMPTION_ENABLED: "false"
       NOTIFICATIONS_WORKER_STANDBY_ONLY: "false"
+      NOTIFICATIONS_WORKER_LEASE_ID: notifications-worker-parent-push-qa
       NOTIFICATIONS_WORKER_LEASE_TTL_MS: "45000"
       NOTIFICATIONS_WORKER_LEASE_RENEW_MS: "10000"
       NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE: "2099-01-01T00:00:00.000Z"
@@ -143,7 +144,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: terexggg-byte/center-management-system-prod
-          ref: 2c920190719a4d6634ecfdc809817d5905d1a2d7
+          ref: 4a61fc42ca0128278796833fd0fe8492e13b4f67
           ssh-key: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
           persist-credentials: false
           path: centrix-rc
@@ -170,6 +171,10 @@ jobs:
       - name: Generate Prisma client
         working-directory: centrix-rc
         run: npm run prisma:generate
+
+      - name: Test Push scheduler and PostgreSQL delivery policies
+        working-directory: centrix-rc
+        run: npm run test:notifications-worker:postgres
 
       - name: Ensure PostgreSQL client exists
         shell: bash
@@ -212,8 +217,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RELEASE_SHA: 2c920190719a4d6634ecfdc809817d5905d1a2d7
+      RELEASE_SHA: 4a61fc42ca0128278796833fd0fe8492e13b4f67
       DATABASE_URL: ${{ secrets.CANARY_DATABASE_URL }}
+      SELF_HANDOFF_OBSERVER_LEASE_ID: notifications-worker-parent-push-qa
       SELF_HANDOFF_OBSERVER_POLL_MS: "2000"
       SELF_HANDOFF_OBSERVER_TIMEOUT_MS: "1500000"
       SELF_HANDOFF_OBSERVER_EXPECTED_OWNERS: ${{ inputs.observer_expected_owners }}
