@@ -11,7 +11,7 @@ import { performance } from "node:perf_hooks";
 const WORKER_STATUS_MESSAGE_TYPE = "centrix.notifications-worker.status.v1";
 const LEADER_STATES = new Set(["leader", "leader-held"]);
 const ACTIVE_RUN_STATES = new Set(["queued", "in_progress", "pending", "waiting", "requested"]);
-const DEFAULT_RELEASE_SHA = "4a61fc42ca0128278796833fd0fe8492e13b4f67";
+const DEFAULT_RELEASE_SHA = "9770d60fa1285828fd4dc6c8df73b773fdf94b43";
 const DEFAULT_GATE_STEP = "Wait for predecessor lease expiration";
 
 function log(event, details = {}) {
@@ -770,6 +770,7 @@ export async function runCanaryObserver({ env = process.env, sleepImpl = sleep }
   let finalZeroSamples = 0;
   let firstOwnerLastExpiresAt = null;
   let secondOwnerFirstDbNow = null;
+  let leadershipObservationStarted = false;
   await writeFile(outputPath, "", { mode: 0o600 });
 
   while (performance.now() < deadline) {
@@ -777,17 +778,8 @@ export async function runCanaryObserver({ env = process.env, sleepImpl = sleep }
     await appendFile(outputPath, `${JSON.stringify({ type: "snapshot", ...snapshot })}\n`);
     maximumActiveLeaders = Math.max(maximumActiveLeaders, Number(snapshot.activeLeaders || 0));
     if (maximumActiveLeaders > 1) throw new Error("Canary observed more than one active PostgreSQL lease leader.");
-    for (const [name, value] of [
-      ["PROCESSING", snapshot.processing],
-      ["QUEUED", snapshot.queued],
-      ["NotificationJob", snapshot.jobs],
-      ["WhatsAppAuthState", snapshot.authStates]
-    ]) {
-      if (Number(value) !== 0) throw new Error(`Canary isolation violated: ${name} count became ${value}.`);
-    }
-    if (snapshot.trafficActive) throw new Error("Canary worker reported trafficActive=true.");
-
     if (Number(snapshot.activeLeaders) === 1) {
+      leadershipObservationStarted = true;
       if (snapshot.release !== expectedRelease) throw new Error("Canary leader release SHA mismatch.");
       if (snapshot.ownerLabel !== "github-actions") throw new Error("Canary leader owner label mismatch.");
       const ownerId = required(snapshot.ownerId, "canary ownerId");
@@ -803,6 +795,21 @@ export async function runCanaryObserver({ env = process.env, sleepImpl = sleep }
       finalZeroSamples = 0;
     } else if (ownerOrder.length === expectedOwners) {
       finalZeroSamples += 1;
+    }
+
+    // Regression fixtures run before the Canary preflight and may briefly create
+    // isolated rows. Enforce the zero-traffic invariant from the first real
+    // Canary lease owner onward; preflight separately proves the fixture cleanup.
+    if (leadershipObservationStarted) {
+      for (const [name, value] of [
+        ["PROCESSING", snapshot.processing],
+        ["QUEUED", snapshot.queued],
+        ["NotificationJob", snapshot.jobs],
+        ["WhatsAppAuthState", snapshot.authStates]
+      ]) {
+        if (Number(value) !== 0) throw new Error(`Canary isolation violated: ${name} count became ${value}.`);
+      }
+      if (snapshot.trafficActive) throw new Error("Canary worker reported trafficActive=true.");
     }
 
     const enoughHeartbeats = ownerOrder.length === expectedOwners

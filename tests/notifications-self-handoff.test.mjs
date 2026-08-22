@@ -11,7 +11,7 @@ import {
   waitForOrchestrationReadiness
 } from "../scripts/notifications-self-handoff.mjs";
 
-const releaseSha = "4a61fc42ca0128278796833fd0fe8492e13b4f67";
+const releaseSha = "9770d60fa1285828fd4dc6c8df73b773fdf94b43";
 const orchestratorSha = "a".repeat(40);
 
 function createGitHubFixture(handler) {
