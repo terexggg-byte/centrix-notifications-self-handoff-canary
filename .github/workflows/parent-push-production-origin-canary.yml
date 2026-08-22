@@ -1,0 +1,88 @@
+name: Parent Push Production-Origin Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      qa_center_name:
+        description: Exact QA center name; non-QA names are rejected
+        required: true
+        default: QA Parent Notifications Center B
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  production-origin-canary:
+    name: Send one browser-safe candidate envelope to Android QA
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_SHA: 23052e2e82b418969256c0599b5b02228b4c56bb
+      CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
+      QA_CENTER_NAME: ${{ inputs.qa_center_name }}
+      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PUBLIC_KEY }}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PRIVATE_KEY }}
+      WEB_PUSH_VAPID_SUBJECT: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_SUBJECT }}
+
+    steps:
+      - name: Checkout orchestration repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify QA-only configuration
+        env:
+          CENTER_MANAGEMENT_RC_DEPLOY_KEY: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          test -n "$DATABASE_URL"
+          test -n "$WEB_PUSH_VAPID_PUBLIC_KEY"
+          test -n "$WEB_PUSH_VAPID_PRIVATE_KEY"
+          test -n "$WEB_PUSH_VAPID_SUBJECT"
+          test -n "$CENTER_MANAGEMENT_RC_DEPLOY_KEY"
+          test -n "$QA_CENTER_NAME"
+          [[ "${QA_CENTER_NAME,,}" == *qa* ]]
+
+      - name: Checkout immutable candidate
+        uses: actions/checkout@v4
+        with:
+          repository: terexggg-byte/center-management-system-prod
+          ref: 23052e2e82b418969256c0599b5b02228b4c56bb
+          ssh-key: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
+          persist-credentials: false
+          path: centrix-rc
+
+      - name: Verify immutable candidate SHA
+        shell: bash
+        run: test "$(git -C "$CENTRIX_RC_DIR" rev-parse HEAD)" = "$RELEASE_SHA"
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.20.2"
+          cache: npm
+          cache-dependency-path: centrix-rc/package-lock.json
+
+      - name: Install candidate dependencies
+        working-directory: centrix-rc
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: centrix-rc
+        run: npm run prisma:generate
+
+      - name: Send one Candidate Worker envelope and await device evidence
+        env:
+          CANARY_EVIDENCE_PATH: ${{ runner.temp }}/parent-push-production-origin-canary.json
+        run: node scripts/parent-push-production-origin-canary.mjs
+
+      - name: Upload safe Canary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parent-push-production-origin-canary-${{ github.run_id }}
+          path: ${{ runner.temp }}/parent-push-production-origin-canary.json
+          if-no-files-found: warn
+          retention-days: 7
