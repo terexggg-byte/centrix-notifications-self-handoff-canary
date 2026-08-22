@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      RELEASE_SHA: e84d34e6ccf16b598a8c51e774d04f595ca9650e
+      RELEASE_SHA: 23052e2e82b418969256c0599b5b02228b4c56bb
       GH_TOKEN: ${{ github.token }}
       DATABASE_URL: ${{ secrets.CANARY_DATABASE_URL }}
       NOTIFICATIONS_WORKER_LEASE_ID: notifications-worker-parent-push-qa

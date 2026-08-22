@@ -12,7 +12,7 @@ import {
   waitForOrchestrationReadiness
 } from "../scripts/notifications-self-handoff.mjs";
 
-const releaseSha = "e84d34e6ccf16b598a8c51e774d04f595ca9650e";
+const releaseSha = "23052e2e82b418969256c0599b5b02228b4c56bb";
 const orchestratorSha = "a".repeat(40);
 
 test("lease gate requires two unchanged PostgreSQL snapshots separated by the renewal interval", async () => {
