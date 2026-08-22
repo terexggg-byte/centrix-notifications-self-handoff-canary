@@ -7,12 +7,54 @@ import path from "node:path";
 import {
   GitHubActionsClient,
   evaluateWatchdog,
+  runLeaseGate,
   runWorkerSession,
   waitForOrchestrationReadiness
 } from "../scripts/notifications-self-handoff.mjs";
 
 const releaseSha = "e84d34e6ccf16b598a8c51e774d04f595ca9650e";
 const orchestratorSha = "a".repeat(40);
+
+test("lease gate requires two unchanged PostgreSQL snapshots separated by the renewal interval", async () => {
+  const snapshots = [
+    { dbNow: "2026-08-22T09:00:00.000Z", activeLeaders: 0, processing: 0, ownerId: null, heartbeatAt: null, expiresAt: null },
+    { dbNow: "2026-08-22T09:00:05.000Z", activeLeaders: 0, processing: 0, ownerId: null, heartbeatAt: null, expiresAt: null },
+    { dbNow: "2026-08-22T09:00:10.000Z", activeLeaders: 0, processing: 0, ownerId: null, heartbeatAt: null, expiresAt: null }
+  ];
+  let index = 0;
+  const result = await runLeaseGate({
+    env: {
+      SELF_HANDOFF_GATE_TIMEOUT_MS: "1000",
+      SELF_HANDOFF_GATE_RETRY_MS: "1",
+      NOTIFICATIONS_WORKER_LEASE_RENEW_MS: "10000"
+    },
+    sleepImpl: async () => {},
+    snapshotReader: async () => snapshots[Math.min(index++, snapshots.length - 1)]
+  });
+  assert.equal(result.open, true);
+  assert.equal(result.attempts, 3);
+});
+
+test("lease gate resets its proof when ownership evidence changes", async () => {
+  const snapshots = [
+    { dbNow: "2026-08-22T09:00:00.000Z", activeLeaders: 0, processing: 0, ownerId: "old", heartbeatAt: "2026-08-22T08:59:00.000Z", expiresAt: "2026-08-22T08:59:45.000Z" },
+    { dbNow: "2026-08-22T09:00:10.000Z", activeLeaders: 0, processing: 0, ownerId: "changed", heartbeatAt: "2026-08-22T09:00:01.000Z", expiresAt: "2026-08-22T09:00:46.000Z" },
+    { dbNow: "2026-08-22T09:00:20.000Z", activeLeaders: 0, processing: 0, ownerId: "changed", heartbeatAt: "2026-08-22T09:00:01.000Z", expiresAt: "2026-08-22T09:00:46.000Z" }
+  ];
+  let index = 0;
+  const result = await runLeaseGate({
+    env: {
+      SELF_HANDOFF_GATE_TIMEOUT_MS: "1000",
+      SELF_HANDOFF_GATE_RETRY_MS: "1",
+      NOTIFICATIONS_WORKER_LEASE_RENEW_MS: "10000"
+    },
+    sleepImpl: async () => {},
+    snapshotReader: async () => snapshots[Math.min(index++, snapshots.length - 1)]
+  });
+  assert.equal(result.open, true);
+  assert.equal(result.attempts, 3);
+  assert.equal(result.first.ownerId, "changed");
+});
 
 function createGitHubFixture(handler) {
   const requests = [];

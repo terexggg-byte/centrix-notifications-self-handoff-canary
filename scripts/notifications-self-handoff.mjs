@@ -533,30 +533,45 @@ function runProcess(command, args, { cwd, env, timeoutMs }) {
   });
 }
 
-export async function runLeaseGate({ env = process.env, sleepImpl = sleep } = {}) {
-  const rcDir = path.resolve(required(env.CENTRIX_RC_DIR, "CENTRIX_RC_DIR"));
-  const leaseStatusScript = path.resolve(
-    env.LEASE_STATUS_SCRIPT || path.join(rcDir, "scripts", "notifications-worker-lease-status.mjs")
-  );
+export async function runLeaseGate({
+  env = process.env,
+  sleepImpl = sleep,
+  snapshotReader = readCanaryObserverSnapshot
+} = {}) {
   const gateTimeoutMs = positiveNumber(env.SELF_HANDOFF_GATE_TIMEOUT_MS, 25 * 60_000, "SELF_HANDOFF_GATE_TIMEOUT_MS");
   const retryMs = positiveNumber(env.SELF_HANDOFF_GATE_RETRY_MS, 2_000, "SELF_HANDOFF_GATE_RETRY_MS");
-  const probeTimeoutMs = positiveNumber(env.SELF_HANDOFF_GATE_PROBE_TIMEOUT_MS, 45_000, "SELF_HANDOFF_GATE_PROBE_TIMEOUT_MS");
+  const renewalIntervalMs = positiveNumber(
+    env.NOTIFICATIONS_WORKER_LEASE_RENEW_MS,
+    10_000,
+    "NOTIFICATIONS_WORKER_LEASE_RENEW_MS"
+  );
   const deadline = performance.now() + gateTimeoutMs;
   let attempts = 0;
+  let firstSafeSnapshot = null;
   while (performance.now() < deadline) {
     attempts += 1;
-    const result = await runProcess(process.execPath, [leaseStatusScript, "--prove-expired-twice"], {
-      cwd: rcDir,
-      env: {
-        ...env,
-        EXPECT_NOTIFICATIONS_LEASE_ACTIVE: "false",
-        EXPECT_NOTIFICATIONS_ZERO_PROCESSING: "true"
-      },
-      timeoutMs: probeTimeoutMs
-    });
-    if (result.exitCode === 0) {
-      log("lease_gate.open", { attempts });
-      return { open: true, attempts };
+    const snapshot = await snapshotReader({ env });
+    const safe = Number(snapshot.activeLeaders || 0) === 0 && Number(snapshot.processing || 0) === 0;
+    if (!safe) {
+      firstSafeSnapshot = null;
+    } else if (!firstSafeSnapshot) {
+      firstSafeSnapshot = snapshot;
+    } else {
+      const unchanged = snapshot.ownerId === firstSafeSnapshot.ownerId
+        && snapshot.heartbeatAt === firstSafeSnapshot.heartbeatAt
+        && snapshot.expiresAt === firstSafeSnapshot.expiresAt;
+      const separatedByRenewal = postgresTimestampMs(snapshot.dbNow)
+        - postgresTimestampMs(firstSafeSnapshot.dbNow) >= renewalIntervalMs;
+      if (unchanged && separatedByRenewal) {
+        log("lease_gate.open", {
+          attempts,
+          renewalIntervalMs,
+          firstDbNow: firstSafeSnapshot.dbNow,
+          secondDbNow: snapshot.dbNow
+        });
+        return { open: true, attempts, first: firstSafeSnapshot, second: snapshot };
+      }
+      if (!unchanged) firstSafeSnapshot = snapshot;
     }
     await sleepImpl(retryMs);
   }
