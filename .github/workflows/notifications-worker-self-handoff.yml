@@ -43,6 +43,16 @@ on:
         required: false
         default: 8
         type: number
+      traffic_not_before:
+        description: Canary-only PostgreSQL traffic gate; Production default remains fail-closed
+        required: false
+        default: "2099-01-01T00:00:00.000Z"
+        type: string
+      run_regression_fixtures:
+        description: Run destructive disposable PostgreSQL regression fixtures before the session
+        required: false
+        default: false
+        type: boolean
       inject_crash:
         description: Canary-only controlled crash after the configured renewals
         required: false
@@ -118,7 +128,8 @@ jobs:
       NOTIFICATIONS_WORKER_LEASE_ID: notifications-worker-parent-push-qa
       NOTIFICATIONS_WORKER_LEASE_TTL_MS: "45000"
       NOTIFICATIONS_WORKER_LEASE_RENEW_MS: "10000"
-      NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE: "2099-01-01T00:00:00.000Z"
+      NOTIFICATIONS_WORKER_TRAFFIC_NOT_BEFORE: ${{ inputs.traffic_not_before }}
+      CENTRIX_PUSH_QA_TIMING_ENABLED: "true"
       CARD_EXPORT_WORKER_ENABLED: "false"
 
     steps:
@@ -173,7 +184,7 @@ jobs:
         run: npm run prisma:generate
 
       - name: Test Push scheduler and PostgreSQL delivery policies
-        if: ${{ inputs.trigger == 'manual' }}
+        if: ${{ inputs.trigger == 'manual' && inputs.run_regression_fixtures }}
         working-directory: centrix-rc
         run: npm run test:notifications-worker:postgres
 
