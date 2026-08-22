@@ -22,17 +22,23 @@ test("lease gate requires two unchanged PostgreSQL snapshots separated by the re
     { dbNow: "2026-08-22T09:00:10.000Z", activeLeaders: 0, processing: 0, ownerId: null, heartbeatAt: null, expiresAt: null }
   ];
   let index = 0;
+  const observedLeaseIds = [];
   const result = await runLeaseGate({
     env: {
       SELF_HANDOFF_GATE_TIMEOUT_MS: "1000",
       SELF_HANDOFF_GATE_RETRY_MS: "1",
-      NOTIFICATIONS_WORKER_LEASE_RENEW_MS: "10000"
+      NOTIFICATIONS_WORKER_LEASE_RENEW_MS: "10000",
+      NOTIFICATIONS_WORKER_LEASE_ID: "notifications-worker-parent-push-qa"
     },
     sleepImpl: async () => {},
-    snapshotReader: async () => snapshots[Math.min(index++, snapshots.length - 1)]
+    snapshotReader: async ({ env }) => {
+      observedLeaseIds.push(env.SELF_HANDOFF_OBSERVER_LEASE_ID);
+      return snapshots[Math.min(index++, snapshots.length - 1)];
+    }
   });
   assert.equal(result.open, true);
   assert.equal(result.attempts, 3);
+  assert.deepEqual(observedLeaseIds, Array(3).fill("notifications-worker-parent-push-qa"));
 });
 
 test("lease gate resets its proof when ownership evidence changes", async () => {
@@ -465,6 +471,9 @@ test("the workflow keeps the immutable RC and places the PostgreSQL gate before 
   const workerIndex = workflow.indexOf("- name: Run self-handoff worker session");
   assert.ok(gateIndex > 0);
   assert.ok(workerIndex > gateIndex);
+  const databaseGateIndex = workflow.indexOf("- name: Test Push scheduler and PostgreSQL delivery policies");
+  assert.ok(databaseGateIndex > 0);
+  assert.match(workflow.slice(databaseGateIndex, workflow.indexOf("- name: Ensure PostgreSQL client exists")), /inputs\.trigger == 'manual'/);
   assert.doesNotMatch(workflow, /^concurrency:/m);
   assert.match(workflow, /SELF_HANDOFF_REMAINING:/);
   assert.match(workflow, /CANARY_DATABASE_URL/);

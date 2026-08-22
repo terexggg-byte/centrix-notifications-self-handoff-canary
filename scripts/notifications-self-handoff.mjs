@@ -546,11 +546,17 @@ export async function runLeaseGate({
     "NOTIFICATIONS_WORKER_LEASE_RENEW_MS"
   );
   const deadline = performance.now() + gateTimeoutMs;
+  const snapshotEnv = {
+    ...env,
+    SELF_HANDOFF_OBSERVER_LEASE_ID: env.SELF_HANDOFF_OBSERVER_LEASE_ID
+      || env.NOTIFICATIONS_WORKER_LEASE_ID
+      || "notifications-worker"
+  };
   let attempts = 0;
   let firstSafeSnapshot = null;
   while (performance.now() < deadline) {
     attempts += 1;
-    const snapshot = await snapshotReader({ env });
+    const snapshot = await snapshotReader({ env: snapshotEnv });
     const safe = Number(snapshot.activeLeaders || 0) === 0 && Number(snapshot.processing || 0) === 0;
     if (!safe) {
       firstSafeSnapshot = null;

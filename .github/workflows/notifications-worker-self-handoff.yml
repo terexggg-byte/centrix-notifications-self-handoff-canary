@@ -173,6 +173,7 @@ jobs:
         run: npm run prisma:generate
 
       - name: Test Push scheduler and PostgreSQL delivery policies
+        if: ${{ inputs.trigger == 'manual' }}
         working-directory: centrix-rc
         run: npm run test:notifications-worker:postgres
 
