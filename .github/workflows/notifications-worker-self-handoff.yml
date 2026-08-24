@@ -246,6 +246,7 @@ jobs:
         if: ${{ !inputs.inject_db_failure && inputs.final_android_gate }}
         shell: bash
         run: |
+          mkdir -p "$CENTRIX_RC_DIR/tmp"
           cp scripts/parent-push-qa-final-android-gate.mjs "$CENTRIX_RC_DIR/tmp/parent-push-qa-final-android-gate.mjs"
           node "$CENTRIX_RC_DIR/tmp/parent-push-qa-final-android-gate.mjs" seed
 
@@ -306,6 +307,7 @@ jobs:
           QA_FINAL_GATE_EVIDENCE_PATH: ${{ runner.temp }}/parent-push-final-android-gate.json
         shell: bash
         run: |
+          mkdir -p "$CENTRIX_RC_DIR/tmp"
           cp scripts/parent-push-qa-final-android-gate.mjs "$CENTRIX_RC_DIR/tmp/parent-push-qa-final-android-gate.mjs"
           node "$CENTRIX_RC_DIR/tmp/parent-push-qa-final-android-gate.mjs" observe
 
