@@ -58,16 +58,11 @@ on:
         required: false
         default: false
         type: boolean
-      production_origin_canary:
-        description: One-shot browser-safe envelope to the exact QA center; no lease or queue processing
+      final_android_gate:
+        description: One final closed-Android ATTENDANCE_LATE gate using Canary secrets only
         required: false
         default: false
         type: boolean
-      qa_center_name:
-        description: Exact QA center name; non-QA names are rejected
-        required: false
-        default: QA Parent Notifications Center B
-        type: string
       inject_crash:
         description: Canary-only controlled crash after the configured renewals
         required: false
@@ -106,7 +101,6 @@ permissions:
 jobs:
   worker-session:
     name: Run immutable Centrix notifications worker session
-    if: ${{ !inputs.production_origin_canary }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
@@ -215,11 +209,11 @@ jobs:
           psql --version
 
       - name: Verify isolated Canary preflight
-        if: ${{ !inputs.inject_db_failure && !inputs.real_provider_release_gate }}
+        if: ${{ !inputs.inject_db_failure && !inputs.real_provider_release_gate && !inputs.final_android_gate }}
         run: node scripts/notifications-self-handoff.mjs canary-preflight
 
       - name: Verify real-provider Release Gate isolation
-        if: ${{ !inputs.inject_db_failure && inputs.real_provider_release_gate }}
+        if: ${{ !inputs.inject_db_failure && (inputs.real_provider_release_gate || inputs.final_android_gate) }}
         shell: bash
         run: |
           branch_id="$(psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc "SELECT current_setting('neon.branch_id', true)")"
@@ -248,15 +242,85 @@ jobs:
         if: ${{ !inputs.inject_db_failure }}
         run: node scripts/notifications-self-handoff.mjs gate
 
+      - name: Enqueue one final Android QA event
+        if: ${{ !inputs.inject_db_failure && inputs.final_android_gate }}
+        shell: bash
+        run: |
+          cp scripts/parent-push-qa-final-android-gate.mjs "$CENTRIX_RC_DIR/tmp/parent-push-qa-final-android-gate.mjs"
+          node "$CENTRIX_RC_DIR/tmp/parent-push-qa-final-android-gate.mjs" seed
+
       - name: Run self-handoff worker session
         if: ${{ !inputs.inject_db_failure }}
         env:
           SELF_HANDOFF_GITHUB_API_URL: ${{ inputs.inject_github_api_failure && 'https://127.0.0.1:9' || github.api_url }}
         run: node scripts/notifications-self-handoff.mjs session
 
+  final-android-observer:
+    name: Prove provider, Service Worker, OS click, and single leadership
+    if: ${{ inputs.final_android_gate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_SHA: 23052e2e82b418969256c0599b5b02228b4c56bb
+      CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
+      DATABASE_URL: ${{ secrets.CANARY_DATABASE_URL }}
+      RELEASE_GATE_NEON_BRANCH_ID: br-damp-frog-axi2djzn
+      QA_FINAL_GATE_TIMEOUT_MS: "900000"
+
+    steps:
+      - name: Checkout orchestration repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout immutable Centrix candidate
+        uses: actions/checkout@v4
+        with:
+          repository: terexggg-byte/center-management-system-prod
+          ref: 23052e2e82b418969256c0599b5b02228b4c56bb
+          ssh-key: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
+          persist-credentials: false
+          path: centrix-rc
+
+      - name: Verify immutable Centrix candidate
+        shell: bash
+        run: test "$(git -C "$CENTRIX_RC_DIR" rev-parse HEAD)" = "$RELEASE_SHA"
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.20.2"
+          cache: npm
+          cache-dependency-path: centrix-rc/package-lock.json
+
+      - name: Install immutable release dependencies
+        working-directory: centrix-rc
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: centrix-rc
+        run: npm run prisma:generate
+
+      - name: Await the safe device ACK chain and click
+        env:
+          QA_FINAL_GATE_EVIDENCE_PATH: ${{ runner.temp }}/parent-push-final-android-gate.json
+        shell: bash
+        run: |
+          cp scripts/parent-push-qa-final-android-gate.mjs "$CENTRIX_RC_DIR/tmp/parent-push-qa-final-android-gate.mjs"
+          node "$CENTRIX_RC_DIR/tmp/parent-push-qa-final-android-gate.mjs" observe
+
+      - name: Upload safe final Android evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parent-push-final-android-gate-${{ github.run_id }}
+          path: ${{ runner.temp }}/parent-push-final-android-gate.json
+          if-no-files-found: warn
+          retention-days: 14
+
   canary-observer:
     name: Observe PostgreSQL lease transitions without granting leadership
-    if: inputs.trigger == 'manual' && !inputs.inject_db_failure && !inputs.real_provider_release_gate && !inputs.production_origin_canary
+    if: inputs.trigger == 'manual' && !inputs.inject_db_failure && !inputs.real_provider_release_gate && !inputs.final_android_gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -295,79 +359,4 @@ jobs:
           name: notifications-self-handoff-canary-${{ github.run_id }}
           path: ${{ runner.temp }}/notifications-self-handoff-canary.jsonl
           if-no-files-found: error
-          retention-days: 7
-
-  production-origin-canary:
-    name: Send one browser-safe candidate envelope to Android QA
-    if: ${{ inputs.production_origin_canary }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      RELEASE_SHA: 23052e2e82b418969256c0599b5b02228b4c56bb
-      CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
-      QA_CENTER_NAME: ${{ inputs.qa_center_name }}
-      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-      WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PUBLIC_KEY }}
-      WEB_PUSH_VAPID_PRIVATE_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PRIVATE_KEY }}
-      WEB_PUSH_VAPID_SUBJECT: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_SUBJECT }}
-
-    steps:
-      - name: Checkout orchestration repository
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Verify QA-only configuration
-        env:
-          CENTER_MANAGEMENT_RC_DEPLOY_KEY: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
-        shell: bash
-        run: |
-          test -n "$DATABASE_URL"
-          test -n "$WEB_PUSH_VAPID_PUBLIC_KEY"
-          test -n "$WEB_PUSH_VAPID_PRIVATE_KEY"
-          test -n "$WEB_PUSH_VAPID_SUBJECT"
-          test -n "$CENTER_MANAGEMENT_RC_DEPLOY_KEY"
-          test -n "$QA_CENTER_NAME"
-          [[ "${QA_CENTER_NAME,,}" == *qa* ]]
-
-      - name: Checkout immutable candidate
-        uses: actions/checkout@v4
-        with:
-          repository: terexggg-byte/center-management-system-prod
-          ref: 23052e2e82b418969256c0599b5b02228b4c56bb
-          ssh-key: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
-          persist-credentials: false
-          path: centrix-rc
-
-      - name: Verify immutable candidate SHA
-        shell: bash
-        run: test "$(git -C "$CENTRIX_RC_DIR" rev-parse HEAD)" = "$RELEASE_SHA"
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20.20.2"
-          cache: npm
-          cache-dependency-path: centrix-rc/package-lock.json
-
-      - name: Install candidate dependencies
-        working-directory: centrix-rc
-        run: npm ci
-
-      - name: Generate Prisma client
-        working-directory: centrix-rc
-        run: npm run prisma:generate
-
-      - name: Send one Candidate Worker envelope and await device evidence
-        env:
-          CANARY_EVIDENCE_PATH: ${{ runner.temp }}/parent-push-production-origin-canary.json
-        run: node scripts/parent-push-production-origin-canary.mjs
-
-      - name: Upload safe Canary evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: parent-push-production-origin-canary-${{ github.run_id }}
-          path: ${{ runner.temp }}/parent-push-production-origin-canary.json
-          if-no-files-found: warn
           retention-days: 7

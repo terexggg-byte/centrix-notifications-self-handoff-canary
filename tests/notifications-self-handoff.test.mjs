@@ -485,10 +485,11 @@ test("the workflow keeps the immutable RC and places the PostgreSQL gate before 
   assert.match(workflow, /inject_db_failure:/);
   assert.match(workflow, /inject_github_api_failure:/);
   assert.match(workflow, /CANARY_ALLOW_ACTIVE_PREDECESSOR: \$\{\{ inputs\.trigger == 'handoff' \}\}/);
-  const productionOriginCanaryIndex = workflow.indexOf("  production-origin-canary:");
-  assert.ok(productionOriginCanaryIndex > 0);
-  assert.doesNotMatch(workflow.slice(0, productionOriginCanaryIndex), /PRODUCTION_/);
-  assert.match(workflow.slice(productionOriginCanaryIndex), /PRODUCTION_DATABASE_URL/);
+  assert.match(workflow, /final_android_gate:/);
+  assert.match(workflow, /Enqueue one final Android QA event/);
+  assert.match(workflow, /Prove provider, Service Worker, OS click, and single leadership/);
+  assert.doesNotMatch(workflow, /PRODUCTION_/);
+  assert.doesNotMatch(workflow, /production_origin_canary/);
   assert.match(workflow, /CARD_EXPORT_WORKER_ENABLED: "false"/);
   assert.doesNotMatch(workflow, /secrets\.DATABASE_URL/);
   const observerJobEnv = workflow.slice(
