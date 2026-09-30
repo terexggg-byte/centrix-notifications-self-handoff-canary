@@ -3,7 +3,7 @@
 import { fork, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { appendFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import process from "node:process";
 import { performance } from "node:perf_hooks";
@@ -11,7 +11,6 @@ import { performance } from "node:perf_hooks";
 const WORKER_STATUS_MESSAGE_TYPE = "centrix.notifications-worker.status.v1";
 const LEADER_STATES = new Set(["leader", "leader-held"]);
 const ACTIVE_RUN_STATES = new Set(["queued", "in_progress", "pending", "waiting", "requested"]);
-const DEFAULT_RELEASE_SHA = "2c920190719a4d6634ecfdc809817d5905d1a2d7";
 const DEFAULT_GATE_STEP = "Wait for predecessor lease expiration";
 
 function log(event, details = {}) {
@@ -219,9 +218,10 @@ async function terminateChild(child, { gracefulTimeoutMs }) {
 }
 
 function workerEnvironment(env) {
+  if (!/^[0-9a-f]{40}$/.test(env.RELEASE_SHA || "")) throw new Error("An approved immutable RELEASE_SHA is required.");
   return {
     ...env,
-    RELEASE_SHA: required(env.RELEASE_SHA || DEFAULT_RELEASE_SHA, "RELEASE_SHA"),
+    RELEASE_SHA: required(env.RELEASE_SHA, "RELEASE_SHA"),
     NOTIFICATIONS_WORKER_INSTANCE_ID: required(
       env.NOTIFICATIONS_WORKER_INSTANCE_ID
         || `gha-${required(env.GITHUB_RUN_ID, "GITHUB_RUN_ID")}-${env.GITHUB_RUN_ATTEMPT || "1"}`,
@@ -239,7 +239,8 @@ export async function runWorkerSession({
   signalTarget = process
 } = {}) {
   const rcDir = path.resolve(required(env.CENTRIX_RC_DIR, "CENTRIX_RC_DIR"));
-  const workerPath = path.join(rcDir, "scripts", "notifications-worker.mjs");
+  const workerPath = path.join(rcDir, "scripts", "render-notifications-worker.mjs");
+  const { probeCloudWorker } = await import(pathToFileURL(path.join(rcDir, "scripts", "whatsapp-cloud-health.mjs")));
   const handoffStartMs = positiveNumber(env.SELF_HANDOFF_START_MS, 285 * 60_000, "SELF_HANDOFF_START_MS");
   const targetStopMs = positiveNumber(env.SELF_HANDOFF_TARGET_MS, 300 * 60_000, "SELF_HANDOFF_TARGET_MS");
   const maximumStopMs = positiveNumber(env.SELF_HANDOFF_MAX_MS, 315 * 60_000, "SELF_HANDOFF_MAX_MS");
@@ -271,7 +272,7 @@ export async function runWorkerSession({
   const runId = required(env.GITHUB_RUN_ID, "GITHUB_RUN_ID");
   const child = forkImpl(workerPath, [], {
     cwd: rcDir,
-    env: workerEnvironment(env),
+    env: { ...workerEnvironment(env), NOTIFICATIONS_WORKER_HTTP_HOST: "127.0.0.1" },
     stdio: ["ignore", "inherit", "inherit", "ipc"]
   });
 
@@ -354,7 +355,21 @@ export async function runWorkerSession({
       return { outcome: "superseded", hadLeadership: false, forced: stopped.forced };
     }
 
-    log("session.leader", { runId, release: env.RELEASE_SHA || DEFAULT_RELEASE_SHA });
+    log("session.leader", { runId, release: env.RELEASE_SHA });
+    // Leadership heartbeat is insufficient. Probe the real wrapper on this runner.
+    const healthTimeoutMs = positiveNumber(env.SELF_HANDOFF_HEALTH_TIMEOUT_MS, 60000, "SELF_HANDOFF_HEALTH_TIMEOUT_MS");
+    const healthStartedAt = monotonicNow();
+    let diagnostics;
+    while (true) {
+      try { diagnostics = await probeCloudWorker({ env, fetchImpl }); }
+      catch { diagnostics = { healthy: false, live: 0, ready: 0 }; }
+      if (diagnostics.healthy) break;
+      if (externalSignal) return { outcome: "external-stop", signal: externalSignal };
+      if (monotonicNow() - healthStartedAt >= healthTimeoutMs) throw new Error("Cloud worker readiness gate failed; outbound remains held.");
+      await sleepImpl(Math.min(pollMs, 1000));
+    }
+    log("session.readiness", diagnostics);
+    let lastHealthAt = monotonicNow();
     let handoffStarted = false;
     let orchestrationReady = false;
     let successorRunId = null;
@@ -398,6 +413,12 @@ export async function runWorkerSession({
 
     while (true) {
       const elapsedMs = monotonicNow() - leaderStartedAt;
+      if (monotonicNow() - lastHealthAt >= pollMs) {
+        diagnostics = await probeCloudWorker({ env, fetchImpl });
+        log("session.readiness", diagnostics);
+        lastHealthAt = monotonicNow();
+        if (!diagnostics.healthy) throw new Error("Cloud worker readiness degraded; coordinated stop required.");
+      }
       if (!handoffStarted && handoffsRemaining !== 0 && elapsedMs >= handoffStartMs) startHandoff();
       if (superseded) {
         handoffCancelled = true;
@@ -456,6 +477,8 @@ export async function runWorkerSession({
       }
     }
   } finally {
+    // Covers failed HTTP/compatibility gates as well as ordinary handoff shutdown.
+    if (child.exitCode === null && child.signalCode === null) await terminateChild(child, { gracefulTimeoutMs });
     signalTarget.off("SIGTERM", onSigterm);
     signalTarget.off("SIGINT", onSigint);
   }
@@ -571,16 +594,29 @@ export async function readPostgresWatchdogSnapshot({ env = process.env } = {}) {
 export function evaluateWatchdog({
   snapshot,
   runs,
-  expectedRelease = DEFAULT_RELEASE_SHA,
+  expectedRelease,
   expectedOwnerLabel = "github-actions",
   candidateFreshnessMs = 20 * 60_000
 }) {
+  if (!/^[0-9a-f]{40}$/.test(expectedRelease || "")) throw new Error("An approved immutable RELEASE_SHA is required.");
   const dbNowMs = Date.parse(snapshot?.dbNow);
   if (!Number.isFinite(dbNowMs)) throw new Error("Watchdog snapshot is missing PostgreSQL dbNow.");
   if (snapshot.active) {
     const release = snapshot.capabilities?.release || null;
     if (snapshot.ownerLabel !== expectedOwnerLabel || release !== expectedRelease) {
       throw new Error("An active lease has an unexpected owner or release; watchdog is fail-closed.");
+    }
+    const wa = snapshot.capabilities?.whatsapp;
+    const connectionAge = dbNowMs - Date.parse(wa?.lastSuccessfulConnectionPoll);
+    const queueAge = dbNowMs - Date.parse(wa?.lastQueuePoll);
+    if (wa?.contractVersion !== 1 || wa?.compatibility !== "compatible"
+      || wa?.consecutiveConnectionPollErrors !== 0 || wa?.consecutiveQueuePollErrors !== 0
+      || wa?.outboundEnabled !== false || !wa?.connectionPollSuccessCount || !wa?.queuePollSuccessCount
+      || ['P2032', 'P2021', 'P2022'].some(code => wa?.errorCodeCounts?.[code] !== 0)
+      || !Number.isFinite(connectionAge) || connectionAge < 0 || connectionAge > 45000
+      || !Number.isFinite(queueAge) || queueAge < 0 || queueAge > 45000) {
+      // Fail visibly; do not dispatch a competing worker against an active lease.
+      throw new Error("Active worker has degraded WhatsApp readiness; operator review required.");
     }
     return { action: "none", reason: "active-leader" };
   }
@@ -614,7 +650,7 @@ export async function runWatchdog({ env = process.env, fetchImpl = fetch } = {})
   const decision = evaluateWatchdog({
     snapshot,
     runs,
-    expectedRelease: required(env.RELEASE_SHA || DEFAULT_RELEASE_SHA, "RELEASE_SHA"),
+    expectedRelease: required(env.RELEASE_SHA, "RELEASE_SHA"),
     expectedOwnerLabel: env.NOTIFICATIONS_WORKER_INSTANCE_LABEL || "github-actions",
     candidateFreshnessMs: positiveNumber(
       env.WATCHDOG_CANDIDATE_FRESHNESS_MS,
@@ -702,7 +738,7 @@ export async function readCanaryObserverSnapshot({ env = process.env } = {}) {
 
 export async function runCanaryObserver({ env = process.env, sleepImpl = sleep } = {}) {
   const outputPath = path.resolve(required(env.SELF_HANDOFF_OBSERVER_OUTPUT, "SELF_HANDOFF_OBSERVER_OUTPUT"));
-  const expectedRelease = required(env.RELEASE_SHA || DEFAULT_RELEASE_SHA, "RELEASE_SHA");
+  const expectedRelease = required(env.RELEASE_SHA, "RELEASE_SHA");
   const expectedOwners = positiveNumber(env.SELF_HANDOFF_OBSERVER_EXPECTED_OWNERS, 2, "SELF_HANDOFF_OBSERVER_EXPECTED_OWNERS");
   const expectedHeartbeats = positiveNumber(
     env.SELF_HANDOFF_OBSERVER_EXPECTED_HEARTBEATS,
@@ -739,7 +775,7 @@ export async function runCanaryObserver({ env = process.env, sleepImpl = sleep }
       if (snapshot.release !== expectedRelease) throw new Error("Canary leader release SHA mismatch.");
       if (snapshot.ownerLabel !== "github-actions") throw new Error("Canary leader owner label mismatch.");
       const ownerId = required(snapshot.ownerId, "canary ownerId");
-      if (!/^gha-\d+-\d+$/.test(ownerId)) throw new Error(`Unexpected canary owner ID: ${ownerId}.`);
+      if (!/^gha-\d+-\d+:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(ownerId)) throw new Error(`Unexpected canary owner ID: ${ownerId}.`);
       if (!owners.has(ownerId)) {
         owners.set(ownerId, new Set());
         ownerOrder.push(ownerId);
