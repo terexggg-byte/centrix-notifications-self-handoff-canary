@@ -10,7 +10,7 @@ permissions:
 jobs:
   runtime-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     environment: production-emergency
     services:
       postgres:
@@ -26,8 +26,8 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
-      RELEASE_SHA: "953c5fe4d919251877f538f6f970d032b304b745"
-      CENTRIX_CLOUD_TEST_DATABASE_URL: postgresql://centrix_test:synthetic-runtime-only@127.0.0.1:5432/centrix_cloud_runtime_test
+      RELEASE_SHA: "a0d000a885bd9a4624e28956ed50e50dfff63436"
+      CENTRIX_CLOUD_TEST_DATABASE_URL: postgresql://centrix_test:synthetic-runtime-only@127.0.0.1:5432/centrix_cloud_runtime_test?connection_limit=5&pool_timeout=10
       DATABASE_URL: postgresql://centrix_test:synthetic-runtime-only@127.0.0.1:5432/centrix_cloud_runtime_test
       GH_TOKEN: ${{ github.token }}
       SELF_HANDOFF_ORCHESTRATOR_SHA: ${{ github.sha }}
@@ -50,21 +50,51 @@ jobs:
           node-version: "20.20.2"
           cache: npm
           cache-dependency-path: centrix-rc/package-lock.json
-      - name: Verify actual RC2 artifact
+      - name: Verify immutable worker artifact
         run: node scripts/notifications-recovery-artifact.mjs
       - name: Test runtime protocol and signals
         run: node --test tests/cloud-runtime-gate.test.mjs tests/notifications-recovery.test.mjs "$CENTRIX_RC_DIR/ops/whatsapp-phase1/orchestrator.test.mjs" "$CENTRIX_RC_DIR/tests/whatsapp-readiness-rc2.test.mjs"
-      - name: Install immutable RC2 dependencies
+      - name: Install immutable worker dependencies
         working-directory: centrix-rc
         run: npm ci
       - name: Generate immutable Prisma client
         working-directory: centrix-rc
         run: npm run prisma:generate
+      - name: Build real Node 20 worker Docker image
+        working-directory: centrix-rc
+        run: docker build --tag centrix-auth-pool:gate .
+      - name: Verify Prisma/runtime imports inside the actual image
+        run: >-
+          docker run --rm --entrypoint node centrix-auth-pool:gate
+          --input-type=module -e "await import('baileys'); await import('@prisma/client'); await import('./scripts/whatsapp-prisma-auth.mjs'); await import('./scripts/notifications-database-metrics.mjs');"
       - name: Create empty localhost synthetic test database schema
         run: node tests/setup-cloud-runtime-db.mjs
+      - name: Prepare separate empty stress database copies (synthetic only)
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE centrix_phase1_auth_ci TEMPLATE centrix_cloud_runtime_test'
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE centrix_cloud_runtime_test_auth_ci TEMPLATE centrix_cloud_runtime_test'
+      - name: Auth FIFO and real PostgreSQL stress/fencing/401 tests
+        working-directory: centrix-rc
+        env:
+          CENTRIX_AUTH_BURST_TEST_DATABASE_URL: postgresql://centrix_test:synthetic-runtime-only@127.0.0.1:5432/centrix_phase1_auth_ci?connection_limit=5&pool_timeout=10
+        run: node --test tests/whatsapp-auth-writer.test.mjs tests/whatsapp-auth-postgres.test.mjs
+      - name: Five-minute real worker pressure gate, mock transports only
+        working-directory: centrix-rc
+        env:
+          CENTRIX_AUTH_WORKER_TEST_DATABASE_URL: postgresql://centrix_test:synthetic-runtime-only@127.0.0.1:5432/centrix_cloud_runtime_test_auth_ci?connection_limit=5&pool_timeout=10
+          CENTRIX_AUTH_WORKER_EVIDENCE: ${{ github.workspace }}/auth-pressure-evidence.json
+        run: node --test tests/whatsapp-auth-worker.test.mjs
       - name: Exercise actual cloud bash-exec launch chain and GitHub Checks
         env:
           CENTRIX_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: node --test tests/cloud-runtime-chain.integration.mjs
+      - name: Preserve synthetic pressure and runtime evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: notifications-auth-pool-gate
+          path: |
+            cloud-runtime-evidence.json
+            auth-pressure-evidence.json
+          retention-days: 7
       - name: Publish isolated gate results
         run: cat cloud-runtime-evidence.json >> "$GITHUB_STEP_SUMMARY"

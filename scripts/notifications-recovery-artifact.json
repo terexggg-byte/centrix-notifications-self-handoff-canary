@@ -1,5 +1,5 @@
 {
-  "release": "953c5fe4d919251877f538f6f970d032b304b745",
+  "release": "a0d000a885bd9a4624e28956ed50e50dfff63436",
   "orchestration": [
     "scripts/notifications-self-handoff.mjs",
     "scripts/notifications-worker-lease-status.mjs",
@@ -11,12 +11,15 @@
   "application": {
     "package.json": "77dd3b17b713e17d91d376bc0470a8dc5c42a2eb2bcf162c2c3b66aff2e1cab8",
     "scripts/render-notifications-worker.mjs": "9687693b96df426ba063b78c788cb9db65cd2b30e09d5c0557eb4f09361bbc69",
-    "scripts/notifications-worker.mjs": "62749a5796f2095a68e216c150201eda41bae53df10f17783b1ad0a63c094c72",
+    "scripts/notifications-worker.mjs": "b21765311dcc68c17c0b6374babe6191d31a445c0b99d288ac3ea23569d231ee",
     "scripts/notifications-worker-runtime.mjs": "b85cb8082ceca82f2f022b4806dd67c1997c86207c01bb656c852b4579428e14",
     "scripts/notifications-worker-postgres-lease.mjs": "5db371c2692472bac50a3bcb9f65fff803bcbe341efdc8d1e4d2ca3c46a0e694",
     "scripts/whatsapp-readiness.mjs": "0c320232657d17bd33d7ca0225cb6948f33fe3b62a6b0022eaee3de373acafa6",
-    "scripts/whatsapp-cloud-health.mjs": "f412c4dc49ea4a09718915041ce2916394adbe8b1bb13068ef614d066a3cfbaf",
+    "scripts/whatsapp-cloud-health.mjs": "b48fb40b99b0942fc68d6db1a5ddd190fa44ad1670314b6d15670aba511e0656",
     "scripts/whatsapp-session-runtime.mjs": "faff5e20fe2cd71b3b38188cfef78512185906d592a34078bb51ee49dc781299",
-    "lib/server/whatsapp-ownership.mjs": "368c93959e5565d01e6bef3bc0077e7a105f464e2dfca68769e2fa1e7511f63c"
+    "lib/server/whatsapp-ownership.mjs": "368c93959e5565d01e6bef3bc0077e7a105f464e2dfca68769e2fa1e7511f63c",
+    "scripts/whatsapp-prisma-auth.mjs": "908fcb5578ca79d96e81949cf6e62716d49406c378daa649a5f4fa67d82fe65b",
+    "scripts/notifications-database-metrics.mjs": "2a0872b5bb6dea691ecbbaa2ab3bced72dfaac39d08f0f7e7d994445ba006adc",
+    "lib/server/notification-worker-health.mjs": "ab0237a0ad6b1cba7cd178b9240e2dc4f321891f116c68a96ccaabbfcae024a5"
   }
 }

@@ -7,7 +7,7 @@ export async function verifyRecoveryArtifact({ env = process.env } = {}) {
   const own = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const rc = path.resolve(env.CENTRIX_RC_DIR || '');
   const manifest = JSON.parse(await readFile(path.join(own, 'scripts/notifications-recovery-artifact.json'), 'utf8'));
-  if (!env.CENTRIX_RC_DIR || env.RELEASE_SHA !== manifest.release) throw Error('LEASE_GATE_ARTIFACT: approved RC2 release and checkout required');
+  if (!env.CENTRIX_RC_DIR || env.RELEASE_SHA !== manifest.release) throw Error('LEASE_GATE_ARTIFACT: approved immutable worker release and checkout required');
   for (const relative of manifest.orchestration) {
     try { await access(path.join(own, relative), constants.R_OK); }
     catch { throw Error(`LEASE_GATE_ARTIFACT: missing orchestration file ${relative}`); }

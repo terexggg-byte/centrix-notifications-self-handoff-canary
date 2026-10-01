@@ -133,6 +133,10 @@ jobs:
         working-directory: centrix-rc
         run: npm run test:notifications-worker
 
+      - name: Test bounded auth writer and safe database diagnostics
+        working-directory: centrix-rc
+        run: node --test tests/whatsapp-auth-writer.test.mjs
+
       - name: Test applied Phase 1 orchestration and health probes
         env:
           CENTRIX_ORCHESTRATOR_MODULE: ${{ github.workspace }}/scripts/notifications-self-handoff.mjs

@@ -9,6 +9,14 @@ function integer(value, name) {
   return value;
 }
 
+function timing(metric, name) {
+  if (!metric || !Number.isFinite(metric.lastLatencyMs) || metric.lastLatencyMs < 0
+    || !Number.isFinite(metric.maxLatencyMs) || metric.maxLatencyMs < 0) throw new Error(`Invalid runtime ${name} timing`);
+  return { successCount: integer(metric.successCount, `${name} successes`), errorCount: integer(metric.errorCount, `${name} errors`),
+    lastLatencyMs: metric.lastLatencyMs, maxLatencyMs: metric.maxLatencyMs,
+    lastSuccessAt: Number.isFinite(Date.parse(metric.lastSuccessAt)) ? metric.lastSuccessAt : null };
+}
+
 // Export only operational fields from runner-local HTTP, never raw response/error payloads.
 export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = new Date().toISOString() }) {
   const d = probe?.diagnostics;
@@ -37,6 +45,9 @@ export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = n
     lastSuccessfulConnectionPoll: d.lastSuccessfulConnectionPoll,
     lastQueuePoll: d.lastQueuePoll,
     errorCodeCounts: Object.fromEntries(['P2032', 'P2021', 'P2022'].map(code => [code, integer(d.errorCodeCounts?.[code], code)])),
+    databaseErrorCounts: Object.fromEntries(['P2024', 'P2028', 'P2032', 'P2021', 'P2022'].map(code => [code, integer(d.databaseErrorCounts?.[code], code)])),
+    leaseRenewal: timing(d.leaseRenewal, 'lease renewal'), pushPoll: timing(d.pushPoll, 'PUSH poll'),
+    authWrites: Object.fromEntries(['active','pending','pendingKeys','maxActive','maxPending','completed','completedKeys','failed','staleRejected','transactionCount','concurrencyLimit','keysPerTransaction'].map(key => [key, integer(d.authWrites?.[key], `auth ${key}`)])),
     outboundEnabled: d.outboundEnabled === false ? false : true
   };
 }
