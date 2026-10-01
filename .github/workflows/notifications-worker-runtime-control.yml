@@ -1,0 +1,43 @@
+name: Notifications Controlled Retirement
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_check_id:
+        required: true
+        type: string
+      owner:
+        required: true
+        type: string
+      epoch:
+        required: true
+        type: string
+      orchestration_sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  retire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production-emergency
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_SHA: ${{ vars.CENTRIX_WORKER_RELEASE_SHA }}
+      RUNTIME_TARGET_CHECK_ID: ${{ inputs.evidence_check_id }}
+      RUNTIME_TARGET_OWNER: ${{ inputs.owner }}
+      RUNTIME_TARGET_EPOCH: ${{ inputs.epoch }}
+      RUNTIME_TARGET_ORCHESTRATION_SHA: ${{ inputs.orchestration_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.20.2"
+      - name: Request retire and wait for process acknowledgment
+        run: exec node scripts/notifications-runtime-control.mjs

@@ -3,7 +3,10 @@
   "orchestration": [
     "scripts/notifications-self-handoff.mjs",
     "scripts/notifications-worker-lease-status.mjs",
-    "scripts/notifications-recovery-artifact.mjs"
+    "scripts/notifications-recovery-artifact.mjs",
+    "scripts/notifications-cloud-runtime.mjs",
+    "scripts/notifications-runtime-process.mjs",
+    "scripts/notifications-runtime-control.mjs"
   ],
   "application": {
     "package.json": "77dd3b17b713e17d91d376bc0470a8dc5c42a2eb2bcf162c2c3b66aff2e1cab8",

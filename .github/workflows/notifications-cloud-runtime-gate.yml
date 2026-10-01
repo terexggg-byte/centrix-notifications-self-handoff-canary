@@ -1,0 +1,68 @@
+name: Notifications Isolated Cloud Runtime Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  runtime-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-emergency
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: centrix_test
+          POSTGRES_PASSWORD: synthetic-runtime-only
+          POSTGRES_DB: centrix_cloud_runtime_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U centrix_test -d centrix_cloud_runtime_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CENTRIX_RC_DIR: ${{ github.workspace }}/centrix-rc
+      RELEASE_SHA: "953c5fe4d919251877f538f6f970d032b304b745"
+      CENTRIX_CLOUD_TEST_DATABASE_URL: postgresql://centrix_test:synthetic-runtime-only@127.0.0.1:5432/centrix_cloud_runtime_test
+      GH_TOKEN: ${{ github.token }}
+      SELF_HANDOFF_ORCHESTRATOR_SHA: ${{ github.sha }}
+      CENTRIX_CLOUD_REAL_CHECKS: "true"
+      CENTRIX_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+      CENTRIX_CLOUD_GATE_EVIDENCE: ${{ github.workspace }}/cloud-runtime-evidence.json
+      CENTRIX_ORCHESTRATOR_MODULE: ${{ github.workspace }}/scripts/notifications-self-handoff.mjs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: terexggg-byte/center-management-system-prod
+          ref: ${{ env.RELEASE_SHA }}
+          ssh-key: ${{ secrets.CENTER_MANAGEMENT_RC_DEPLOY_KEY }}
+          persist-credentials: false
+          path: centrix-rc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.20.2"
+          cache: npm
+          cache-dependency-path: centrix-rc/package-lock.json
+      - name: Verify actual RC2 artifact
+        run: node scripts/notifications-recovery-artifact.mjs
+      - name: Test runtime protocol and signals
+        run: node --test tests/cloud-runtime-gate.test.mjs tests/notifications-recovery.test.mjs "$CENTRIX_RC_DIR/ops/whatsapp-phase1/orchestrator.test.mjs" "$CENTRIX_RC_DIR/tests/whatsapp-readiness-rc2.test.mjs"
+      - name: Install immutable RC2 dependencies
+        working-directory: centrix-rc
+        run: npm ci
+      - name: Generate immutable Prisma client
+        working-directory: centrix-rc
+        run: npm run prisma:generate
+      - name: Create empty localhost synthetic test database schema
+        run: node tests/setup-cloud-runtime-db.mjs
+      - name: Exercise actual cloud bash-exec launch chain and GitHub Checks
+        run: node --test tests/cloud-runtime-chain.integration.mjs
+      - name: Publish isolated gate results
+        run: cat cloud-runtime-evidence.json >> "$GITHUB_STEP_SUMMARY"

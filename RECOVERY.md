@@ -30,3 +30,25 @@ Recovery order: assert production SHA/baseline/outbound, publish this orchestrat
 start one terminal session with watchdog disarmed, observe multiple successful
 polls, coordinated stop/restart after gate proves expiry, then arm compatible
 watchdog. Never restore legacy/RC1 or bypass gate. Do not mutate auth/held backlog.
+
+Final cloud runtime gate:
+- The production session step uses `exec node`, so cancellation reaches the
+  supervisor directly. It forwards SIGTERM to the unchanged RC2 wrapper.
+- `Centrix direct runtime evidence` is a dedicated GitHub Check Run, updated from
+  runner-loopback /live and /ready probes every 15 seconds. It exports only
+  owner/epoch/process UUID/revision/pids, poll/error counters and outbound hold.
+  This is readable through the Checks REST API while the worker job stays active;
+  no public health endpoint, new database table or application change is needed.
+- The protected `Notifications Controlled Retirement` workflow binds a short-lived
+  request to a fresh evidence check ID and exact run/owner/epoch/process UUID/SHA.
+  The running supervisor stops its child first, observes RC2 stopping/heartbeat
+  stop/worker exit, verifies no child pids remain, then publishes acknowledgment.
+  Only then does the session finish naturally. A forced/incomplete stop is failure.
+- GitHub cancellation has a hard runner timeout and is never represented as a
+  guaranteed successful job exit. Use controlled retirement for audited handoff;
+  successors still require the existing PostgreSQL expiry/renewal-safety gate.
+- `notifications-cloud-runtime-gate.yml` runs the same bash-exec supervisor -> RC2
+  wrapper -> worker chain on a real GitHub runner with a LOCAL synthetic PostgreSQL
+  service, mock WhatsApp/Push and real GitHub Checks API. No Production DB or auth
+  is supplied. It exercises SIGINT/SIGTERM, controlled retirement, cancellation-like
+  signals, DB outage, stale callbacks, frozen heartbeat, successor gate and watchdog.

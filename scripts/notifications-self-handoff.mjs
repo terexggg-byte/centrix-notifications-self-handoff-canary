@@ -5,6 +5,8 @@ import crypto from "node:crypto";
 import { appendFile, writeFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { verifyRecoveryArtifact } from "./notifications-recovery-artifact.mjs";
+import { CloudRuntimeChannel, directEvidence } from "./notifications-cloud-runtime.mjs";
+import { lifecycleObserver, childProcessIds, stopRuntimeChild } from "./notifications-runtime-process.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import process from "node:process";
@@ -201,23 +203,6 @@ export async function waitForOrchestrationReadiness({
   throw new Error(`Timed out waiting for successor run ${runId} to reach the lease gate.`);
 }
 
-async function terminateChild(child, { gracefulTimeoutMs }) {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return { forced: false, exitCode: child.exitCode, signal: child.signalCode };
-  }
-  return new Promise((resolve) => {
-    let forced = false;
-    const timeout = setTimeout(() => {
-      forced = true;
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    }, gracefulTimeoutMs);
-    child.once("exit", (exitCode, signal) => {
-      clearTimeout(timeout);
-      resolve({ forced, exitCode, signal });
-    });
-    child.kill("SIGTERM");
-  });
-}
 
 function workerEnvironment(env) {
   if (!/^[0-9a-f]{40}$/.test(env.RELEASE_SHA || "")) throw new Error("An approved immutable RELEASE_SHA is required.");
@@ -273,11 +258,29 @@ export async function runWorkerSession({
   const workflowRef = required(env.SELF_HANDOFF_WORKFLOW_REF, "SELF_HANDOFF_WORKFLOW_REF");
   const orchestratorSha = required(env.SELF_HANDOFF_ORCHESTRATOR_SHA, "SELF_HANDOFF_ORCHESTRATOR_SHA");
   const runId = required(env.GITHUB_RUN_ID, "GITHUB_RUN_ID");
+  const runtimeExport = env.SELF_HANDOFF_RUNTIME_EXPORT_ENABLED === "true";
+  const runtimeChannel = runtimeExport ? new CloudRuntimeChannel({ github, env }) : null;
+  if (runtimeChannel) await runtimeChannel.initialize(); // Fail before child launch if checks permission is absent.
   const child = forkImpl(workerPath, [], {
     cwd: rcDir,
     env: { ...workerEnvironment(env), NOTIFICATIONS_WORKER_HTTP_HOST: "127.0.0.1" },
-    stdio: ["ignore", "inherit", "inherit", "ipc"]
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
   });
+
+  const lifecycle = lifecycleObserver(child);
+  let workerPids = null;
+  let retirementCommand = null;
+  let shutdownAck = null;
+  const stop = async (reason) => {
+    if (shutdownAck) return shutdownAck;
+    shutdownAck = await stopRuntimeChild(child, { gracefulTimeoutMs, reason, lifecycle, workerPids: workerPids || childProcessIds(child.pid) });
+    log("shutdown.acknowledgment", shutdownAck);
+    if (runtimeChannel?.evidence) {
+      const completion = await runtimeChannel.finish(shutdownAck, retirementCommand);
+      if (!completion.success) throw new Error("Runtime retirement acknowledgment failed; no successor bypass permitted.");
+    }
+    return shutdownAck;
+  };
 
   let leaderStartedAt = null;
   let hadLeadership = false;
@@ -343,17 +346,17 @@ export async function runWorkerSession({
         externalStop.then((signal) => ({ state: "external-stop", signal }))
       ]);
     } catch (error) {
-      await terminateChild(child, { gracefulTimeoutMs });
+      await stop(externalSignal || "session-stop");
       throw error;
     } finally {
       clearTimeout(startupTimeout);
     }
     if (firstState.state === "external-stop") {
-      const stopped = await terminateChild(child, { gracefulTimeoutMs });
+      const stopped = await stop(externalSignal || "session-stop");
       return { outcome: "external-stop", signal: firstState.signal, forced: stopped.forced };
     }
     if (firstState.state === "standby") {
-      const stopped = await terminateChild(child, { gracefulTimeoutMs });
+      const stopped = await stop(externalSignal || "session-stop");
       log("session.superseded", { runId, forced: stopped.forced });
       return { outcome: "superseded", hadLeadership: false, forced: stopped.forced };
     }
@@ -371,6 +374,8 @@ export async function runWorkerSession({
       if (monotonicNow() - healthStartedAt >= healthTimeoutMs) throw new Error("Cloud worker readiness gate failed; outbound remains held.");
       await sleepImpl(Math.min(pollMs, 1000));
     }
+    workerPids = childProcessIds(child.pid);
+    if (runtimeChannel) await runtimeChannel.publish(directEvidence({ probe: diagnostics, env, wrapperPid: child.pid, workerPids }));
     log("session.readiness", diagnostics);
     // One machine-readable check annotation exposes the actual runner-local HTTP
     // result while a long-running session remains active; no public health port.
@@ -378,6 +383,8 @@ export async function runWorkerSession({
       process.stdout.write(`::notice title=Centrix verified readiness::${JSON.stringify(diagnostics)}\n`);
     }
     let lastHealthAt = monotonicNow();
+    let lastRuntimeExportAt = monotonicNow();
+    const runtimeExportMs = positiveNumber(env.SELF_HANDOFF_RUNTIME_EXPORT_MS, 15000, "SELF_HANDOFF_RUNTIME_EXPORT_MS");
     let handoffStarted = false;
     let orchestrationReady = false;
     let successorRunId = null;
@@ -420,6 +427,11 @@ export async function runWorkerSession({
     };
 
     while (true) {
+      if (externalSignal) {
+        handoffCancelled = true;
+        const stopped = await stop(externalSignal);
+        return { outcome: externalSignal === "controlled-retire" ? "controlled-retire" : "external-stop", signal: externalSignal, forced: stopped.forced, shutdown: stopped };
+      }
       const elapsedMs = monotonicNow() - leaderStartedAt;
       if (monotonicNow() - lastHealthAt >= pollMs) {
         diagnostics = await probeCloudWorker({ env, fetchImpl });
@@ -427,15 +439,31 @@ export async function runWorkerSession({
         lastHealthAt = monotonicNow();
         if (!diagnostics.healthy) throw new Error("Cloud worker readiness degraded; coordinated stop required.");
       }
+      if (runtimeChannel && monotonicNow() - lastRuntimeExportAt >= runtimeExportMs) {
+        try {
+          await runtimeChannel.publish(directEvidence({ probe: diagnostics, env, wrapperPid: child.pid, workerPids }));
+          retirementCommand = await runtimeChannel.retirementRequest();
+          lastRuntimeExportAt = monotonicNow();
+          if (retirementCommand) {
+            handoffCancelled = true;
+            log("retirement.accepted", { requestId: retirementCommand.request.requestId, checkId: retirementCommand.checkId });
+            requestExternalStop("controlled-retire");
+            continue;
+          }
+        } catch (error) {
+          lastRuntimeExportAt = monotonicNow();
+          log("runtime.export_failed", { error: redactError(error) });
+        }
+      }
       if (!handoffStarted && handoffsRemaining !== 0 && elapsedMs >= handoffStartMs) startHandoff();
       if (superseded) {
         handoffCancelled = true;
-        const stopped = await terminateChild(child, { gracefulTimeoutMs });
+        const stopped = await stop(externalSignal || "session-stop");
         return { outcome: "superseded-after-leadership", hadLeadership: true, forced: stopped.forced };
       }
       if (elapsedMs >= targetStopMs && orchestrationReady) {
         handoffCancelled = true;
-        const stopped = await terminateChild(child, { gracefulTimeoutMs });
+        const stopped = await stop(externalSignal || "session-stop");
         if (stopped.forced) throw new Error("Worker required SIGKILL during graceful handoff.");
         return {
           outcome: "handed-off",
@@ -446,7 +474,7 @@ export async function runWorkerSession({
         };
       }
       if (elapsedMs >= targetStopMs && handoffsRemaining === 0) {
-        const stopped = await terminateChild(child, { gracefulTimeoutMs });
+        const stopped = await stop(externalSignal || "session-stop");
         if (stopped.forced) throw new Error("Worker required SIGKILL while completing the terminal canary session.");
         return {
           outcome: "terminal-session-complete",
@@ -457,7 +485,7 @@ export async function runWorkerSession({
       }
       if (elapsedMs >= maximumStopMs) {
         handoffCancelled = true;
-        const stopped = await terminateChild(child, { gracefulTimeoutMs });
+        const stopped = await stop(externalSignal || "session-stop");
         if (stopped.forced) throw new Error("Worker required SIGKILL at the maximum session boundary.");
         return {
           outcome: "maximum-boundary",
@@ -476,7 +504,7 @@ export async function runWorkerSession({
       ]);
       if (exit.type === "external-stop" || (exit.type === "exit" && externalSignal)) {
         handoffCancelled = true;
-        const stopped = await terminateChild(child, { gracefulTimeoutMs });
+        const stopped = await stop(externalSignal || "session-stop");
         return { outcome: "external-stop", signal: externalSignal, forced: stopped.forced };
       }
       if (exit.type === "exit") {
@@ -486,7 +514,7 @@ export async function runWorkerSession({
     }
   } finally {
     // Covers failed HTTP/compatibility gates as well as ordinary handoff shutdown.
-    if (child.exitCode === null && child.signalCode === null) await terminateChild(child, { gracefulTimeoutMs });
+    if (!shutdownAck) await stop(externalSignal || "session-finalize");
     signalTarget.off("SIGTERM", onSigterm);
     signalTarget.off("SIGINT", onSigint);
   }

@@ -32,6 +32,7 @@ on:
 permissions:
   actions: write
   contents: read
+  checks: write
 
 jobs:
   worker-session:
@@ -53,6 +54,8 @@ jobs:
       SELF_HANDOFF_READINESS_TIMEOUT_MS: "1500000"
       SELF_HANDOFF_GATE_TIMEOUT_MS: "1500000"
       SELF_HANDOFF_GRACEFUL_TIMEOUT_MS: "300000"
+      SELF_HANDOFF_RUNTIME_EXPORT_ENABLED: "true"
+      SELF_HANDOFF_RUNTIME_EXPORT_MS: "15000"
       DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
       WHATSAPP_AUTH_ENCRYPTION_KEY: ${{ secrets.PRODUCTION_WHATSAPP_AUTH_ENCRYPTION_KEY }}
       WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PUBLIC_KEY }}
@@ -119,6 +122,9 @@ jobs:
       - name: Test recovery lease gate
         run: node --test tests/notifications-recovery.test.mjs
 
+      - name: Test cloud runtime evidence and retirement
+        run: node --test tests/cloud-runtime-gate.test.mjs
+
       - name: Install immutable release dependencies
         working-directory: centrix-rc
         run: npm ci
@@ -144,4 +150,4 @@ jobs:
         run: node scripts/notifications-self-handoff.mjs gate
 
       - name: Run self-handoff worker session
-        run: node scripts/notifications-self-handoff.mjs session
+        run: exec node scripts/notifications-self-handoff.mjs session
