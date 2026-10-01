@@ -113,6 +113,12 @@ jobs:
           cache: npm
           cache-dependency-path: centrix-rc/package-lock.json
 
+      - name: Verify recovery checkout artifact manifest
+        run: node scripts/notifications-recovery-artifact.mjs
+
+      - name: Test recovery lease gate
+        run: node --test tests/notifications-recovery.test.mjs
+
       - name: Install immutable release dependencies
         working-directory: centrix-rc
         run: npm ci

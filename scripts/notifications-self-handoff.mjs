@@ -2,7 +2,9 @@
 
 import { fork, spawn } from "node:child_process";
 import crypto from "node:crypto";
-import { appendFile, writeFile } from "node:fs/promises";
+import { appendFile, writeFile, access } from "node:fs/promises";
+import { constants } from "node:fs";
+import { verifyRecoveryArtifact } from "./notifications-recovery-artifact.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import process from "node:process";
@@ -238,6 +240,7 @@ export async function runWorkerSession({
   monotonicNow = () => performance.now(),
   signalTarget = process
 } = {}) {
+  await verifyRecoveryArtifact({ env });
   const rcDir = path.resolve(required(env.CENTRIX_RC_DIR, "CENTRIX_RC_DIR"));
   const workerPath = path.join(rcDir, "scripts", "render-notifications-worker.mjs");
   const { probeCloudWorker } = await import(pathToFileURL(path.join(rcDir, "scripts", "whatsapp-cloud-health.mjs")));
@@ -369,6 +372,11 @@ export async function runWorkerSession({
       await sleepImpl(Math.min(pollMs, 1000));
     }
     log("session.readiness", diagnostics);
+    // One machine-readable check annotation exposes the actual runner-local HTTP
+    // result while a long-running session remains active; no public health port.
+    if (env.GITHUB_ACTIONS === 'true') {
+      process.stdout.write(`::notice title=Centrix verified readiness::${JSON.stringify(diagnostics)}\n`);
+    }
     let lastHealthAt = monotonicNow();
     let handoffStarted = false;
     let orchestrationReady = false;
@@ -497,7 +505,7 @@ function runProcess(command, args, { cwd, env, timeoutMs }) {
     child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk); });
     child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk); });
     const timeout = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-    child.once("error", reject);
+    child.once("error", error => { clearTimeout(timeout); reject(error); });
     child.once("exit", (exitCode, signal) => {
       clearTimeout(timeout);
       resolve({ exitCode, signal, stdout, stderr });
@@ -505,34 +513,80 @@ function runProcess(command, args, { cwd, env, timeoutMs }) {
   });
 }
 
-export async function runLeaseGate({ env = process.env, sleepImpl = sleep } = {}) {
-  const rcDir = path.resolve(required(env.CENTRIX_RC_DIR, "CENTRIX_RC_DIR"));
-  const leaseStatusScript = path.resolve(
-    env.LEASE_STATUS_SCRIPT || path.join(rcDir, "scripts", "notifications-worker-lease-status.mjs")
-  );
-  const gateTimeoutMs = positiveNumber(env.SELF_HANDOFF_GATE_TIMEOUT_MS, 25 * 60_000, "SELF_HANDOFF_GATE_TIMEOUT_MS");
-  const retryMs = positiveNumber(env.SELF_HANDOFF_GATE_RETRY_MS, 2_000, "SELF_HANDOFF_GATE_RETRY_MS");
-  const probeTimeoutMs = positiveNumber(env.SELF_HANDOFF_GATE_PROBE_TIMEOUT_MS, 45_000, "SELF_HANDOFF_GATE_PROBE_TIMEOUT_MS");
-  const deadline = performance.now() + gateTimeoutMs;
-  let attempts = 0;
-  while (performance.now() < deadline) {
-    attempts += 1;
-    const result = await runProcess(process.execPath, [leaseStatusScript, "--prove-expired-twice"], {
-      cwd: rcDir,
-      env: {
-        ...env,
-        EXPECT_NOTIFICATIONS_LEASE_ACTIVE: "false",
-        EXPECT_NOTIFICATIONS_ZERO_PROCESSING: "true"
-      },
-      timeoutMs: probeTimeoutMs
-    });
-    if (result.exitCode === 0) {
-      log("lease_gate.open", { attempts });
-      return { open: true, attempts };
-    }
-    await sleepImpl(retryMs);
+export function validateLeaseProof(proof, leaseId) {
+  if (proof?.protocol !== 'centrix.lease-gate.v1' || !['clear','blocked','transient','fatal'].includes(proof.state)) throw Error('LEASE_GATE_INVALID_OUTPUT: invalid verifier protocol/state');
+  if (['transient','fatal'].includes(proof.state)) {
+    if (typeof proof.code !== 'string' || typeof proof.message !== 'string') throw Error('LEASE_GATE_INVALID_OUTPUT: missing error code');
+    if (proof.state === 'transient' && !['P1001','P1002','P1008','P1017','P2024','P2034','LEASE_GATE_PROBE_TIMEOUT'].includes(proof.code)) throw Error('LEASE_GATE_INVALID_OUTPUT: non-transient error classified for retry');
+    return proof;
   }
-  throw new Error("PostgreSQL lease gate did not prove zero leaders and zero PROCESSING before timeout.");
+  const s = proof.snapshot;
+  if (!s || s.leaseId !== leaseId || !Number.isFinite(Date.parse(s.dbNow)) || typeof s.active !== 'boolean'
+    || s.contractVersion !== 1 || s.outboundEnabled !== false
+    || !['processing','ambiguousLocks','ambiguousCardAttempts'].every(k => Number.isSafeInteger(s[k]) && s[k] >= 0)
+    || !['heartbeatAt','expiresAt'].every(k => s[k] === null || (typeof s[k] === 'string' && Number.isFinite(Date.parse(s[k]))))
+    || !((s.ownerId === null && s.epoch === null && s.expiresAt === null && s.heartbeatAt === null)
+      || (typeof s.ownerId === 'string' && s.ownerId.length > 0 && Number.isSafeInteger(s.epoch) && s.epoch >= 0 && s.expiresAt !== null && s.heartbeatAt !== null))) throw Error('LEASE_GATE_INVALID_OUTPUT: incomplete schema or outbound proof');
+  if (s.active !== (s.expiresAt !== null && Date.parse(s.expiresAt) > Date.parse(s.dbNow))) throw Error('LEASE_GATE_INVALID_OUTPUT: contradictory server-time expiry');
+  const clear = !s.active && s.processing === 0 && s.ambiguousLocks === 0 && s.ambiguousCardAttempts === 0;
+  if ((proof.state === 'clear') !== clear) throw Error('LEASE_GATE_INVALID_OUTPUT: contradictory in-flight proof');
+  return proof;
+}
+
+export async function runLeaseGate({ env = process.env, sleepImpl = sleep, probeImpl = runProcess, logImpl = log } = {}) {
+  await verifyRecoveryArtifact({ env });
+  const rcDir = path.resolve(required(env.CENTRIX_RC_DIR, "CENTRIX_RC_DIR"));
+  const leaseStatusScript = path.resolve(env.LEASE_STATUS_SCRIPT || path.join(path.dirname(fileURLToPath(import.meta.url)), 'notifications-worker-lease-status.mjs'));
+  try { await access(leaseStatusScript, constants.R_OK); }
+  catch { throw Error('LEASE_GATE_ARTIFACT: verifier executable missing/unreadable'); }
+  const leaseId = String(env.NOTIFICATIONS_WORKER_LEASE_ID || 'notifications-worker');
+  const gateTimeoutMs = positiveNumber(env.SELF_HANDOFF_GATE_TIMEOUT_MS, 25 * 60_000, 'SELF_HANDOFF_GATE_TIMEOUT_MS');
+  const retryMs = positiveNumber(env.SELF_HANDOFF_GATE_RETRY_MS, 2000, 'SELF_HANDOFF_GATE_RETRY_MS');
+  const renewalMs = positiveNumber(env.NOTIFICATIONS_WORKER_LEASE_RENEW_MS, 10000, 'NOTIFICATIONS_WORKER_LEASE_RENEW_MS');
+  const probeTimeoutMs = positiveNumber(env.SELF_HANDOFF_GATE_PROBE_TIMEOUT_MS, 45000, 'SELF_HANDOFF_GATE_PROBE_TIMEOUT_MS');
+  const maxDbErrors = positiveNumber(env.SELF_HANDOFF_GATE_MAX_DB_ERRORS, 3, 'SELF_HANDOFF_GATE_MAX_DB_ERRORS');
+  const deadline = performance.now() + gateTimeoutMs;
+  let attempts = 0, dbErrors = 0, first = null;
+  const safeStderr = value => {
+    let safe = redactError(String(value || ''));
+    for (const [key, secret] of Object.entries(env)) if (/DATABASE_URL|TOKEN|SECRET|PRIVATE_KEY|ENCRYPTION_KEY/.test(key) && secret) safe = safe.replaceAll(String(secret), '[REDACTED]');
+    return safe.slice(-1000);
+  };
+  while (performance.now() < deadline) {
+    attempts++;
+    let result;
+    try { result = await probeImpl(process.execPath, [leaseStatusScript], { cwd: rcDir, env, timeoutMs: probeTimeoutMs }); }
+    catch (error) { throw Error(`LEASE_GATE_ARTIFACT: verifier cannot execute (${error.code || error.name})`); }
+    if (/MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|Cannot find module|ENOENT/.test(result.stderr || '')) throw Error('LEASE_GATE_ARTIFACT: missing verifier dependency; ' + safeStderr(result.stderr));
+    let proof;
+    if (result.signal === 'SIGKILL' && !result.stdout) proof = { protocol: 'centrix.lease-gate.v1', state: 'transient', code: 'LEASE_GATE_PROBE_TIMEOUT', message: 'Database probe timed out' };
+    else {
+      try { proof = validateLeaseProof(JSON.parse(result.stdout.trim()), leaseId); }
+      catch (error) { throw Error(`LEASE_GATE_INVALID_OUTPUT: ${safeStderr(error.message)}; stderr=${safeStderr(result.stderr)}`); }
+      const expectedExit = { clear: 0, blocked: 2, transient: 3, fatal: [4,5] }[proof.state];
+      if (!(Array.isArray(expectedExit) ? expectedExit.includes(result.exitCode) : result.exitCode === expectedExit)) throw Error('LEASE_GATE_INVALID_OUTPUT: verifier exit/status mismatch');
+    }
+    if (proof.state === 'fatal') throw Error(`LEASE_GATE_FATAL: ${proof.code}; ${safeStderr(result.stderr)}`);
+    if (proof.state === 'transient') {
+      first = null; dbErrors++;
+      logImpl('lease_gate.db_retry', { attempts, dbErrors, code: proof.code, stderr: safeStderr(result.stderr) });
+      if (dbErrors >= maxDbErrors) throw Error(`LEASE_GATE_DB_UNAVAILABLE: ${dbErrors} failed probes; last=${proof.code}`);
+      await sleepImpl(retryMs); continue;
+    }
+    const s = proof.snapshot;
+    if (proof.state === 'blocked') {
+      first = null;
+      logImpl('lease_gate.blocked', { attempts, dbNow: s.dbNow, active: s.active, processing: s.processing, ambiguousLocks: s.ambiguousLocks, ambiguousCardAttempts: s.ambiguousCardAttempts });
+      await sleepImpl(retryMs); continue;
+    }
+    if (first && ['ownerId','epoch','heartbeatAt','expiresAt'].every(k => first[k] === s[k]) && Date.parse(s.dbNow) - Date.parse(first.dbNow) >= renewalMs) {
+      logImpl('lease_gate.open', { attempts, evidence: [first, s] });
+      return { open: true, attempts, evidence: [first, s] };
+    }
+    first = s;
+    await sleepImpl(renewalMs);
+  }
+  throw Error('LEASE_GATE_TIMEOUT: no stable expired lease and zero ambiguous in-flight proof');
 }
 
 const WATCHDOG_SQL = String.raw`
@@ -828,7 +882,7 @@ async function main() {
 const isEntrypoint = process.argv[1]
   && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isEntrypoint) {
-  main().catch((error) => {
+  main().then(result => log("orchestrator.complete", result)).catch((error) => {
     process.stderr.write(`${JSON.stringify({ event: "orchestrator.failed", error: redactError(error) })}\n`);
     process.exitCode = 1;
   });
