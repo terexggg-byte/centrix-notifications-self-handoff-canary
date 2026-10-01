@@ -123,10 +123,11 @@ export async function requestRetirement({ github, targetCheckId, expectedOwner, 
     || evidence.outboundEnabled !== false || Date.now() - observedMs > 60_000) {
     throw new Error('Retirement refused: fresh direct HTTP evidence/owner/epoch binding required');
   }
+  const createdMs = Date.now();
   const request = { protocol: RUNTIME_PROTOCOL, action: 'retire', requestId: crypto.randomUUID(),
     targetEvidenceCheckId: Number(targetCheckId), targetRunId: evidence.runId, targetOwner: evidence.owner,
     targetEpoch: evidence.epoch, targetProcessUuid: evidence.processUuid, revision: evidence.revision,
-    orchestrationSha: evidence.orchestrationSha, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 300_000).toISOString() };
+    orchestrationSha: evidence.orchestrationSha, createdAt: new Date(createdMs).toISOString(), expiresAt: new Date(createdMs + 300_000).toISOString() };
   const created = await github.request(`${prefix}/check-runs`, { method: 'POST', body: {
     name: RETIRE_CHECK, head_sha: expectedOrchestration, external_id: `centrix-retire:${request.requestId}`,
     status: 'in_progress', started_at: request.createdAt, output: { title: RETIRE_CHECK, summary: JSON.stringify(request) }
