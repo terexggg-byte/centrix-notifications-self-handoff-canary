@@ -157,6 +157,7 @@ jobs:
           node scripts/verify-whatsapp-phase1.mjs
           node scripts/verify-whatsapp-auth-protection.mjs
           node scripts/verify-whatsapp-qa-canary.mjs
+          node scripts/verify-whatsapp-qa-event-pilot.mjs
 
       - name: Wait for predecessor lease expiration
         run: node scripts/notifications-self-handoff.mjs gate

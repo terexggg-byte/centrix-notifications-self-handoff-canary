@@ -25,3 +25,10 @@ test('retirement TTL uses one clock instant even if the clock advances between f
 test('pool/PUSH diagnostics are strict numeric allowlists, malformed or missing data fails closed',()=>{const v=evidence();assert.equal(v.databaseErrorCounts.P2024,0);assert.equal(v.authWrites.concurrencyLimit,1);assert.equal(v.pushPoll.successCount,9);for(const patch of [{databaseErrorCounts:undefined},{databaseErrorCounts:{P2024:'0'}},{leaseRenewal:{successCount:1,maxLatencyMs:'secret',lastLatencyMs:1}},{authWrites:{active:0}}])assert.throws(()=>directEvidence({probe:{...probe,diagnostics:{...probe.diagnostics,...patch}},env,wrapperPid:100,workerPids:[101]}))});
 
 test('canary evidence is strict, masked and cannot conceal attempt >1',()=>{const v=canaryEvidence({canaryId:'qa-first-live-canary-20261002',status:'SERVER_ACK',transportRetryDisabled:true,providerAttemptCount:1,providerCallCount:1,maskedRecipient:'+20******2924',phone:'secret-number',credentials:'must-not-export'});assert.equal(v.status,'SERVER_ACK');assert.equal(v.transportRetryDisabled,true);assert.equal(v.deliveredAt,undefined);assert.doesNotMatch(JSON.stringify(v),/secret-number|credentials/);assert.throws(()=>canaryEvidence({...v,providerAttemptCount:2}));assert.throws(()=>canaryEvidence({...v,maskedRecipient:'full-number'}));});
+
+test('QA event evidence exports no phones or free payload and refuses attempt >1',async()=>{
+ const {eventPilotEvidence}=await import('../scripts/notifications-cloud-runtime.mjs');
+ const v=eventPilotEvidence({pilotId:'qa-attendance-event-pilot-20261003',status:'SUBMITTED',providerAttemptCount:1,providerCallCount:1,maskedRecipient:'+20******2924',phone:'must-not-export',text:'must-not-export'});
+ assert.equal(v.status,'SUBMITTED');assert.doesNotMatch(JSON.stringify(v),/must-not-export|"phone"|"text"/);
+ assert.throws(()=>eventPilotEvidence({...v,providerCallCount:2}));assert.throws(()=>eventPilotEvidence({...v,maskedRecipient:'full-recipient'}));
+});

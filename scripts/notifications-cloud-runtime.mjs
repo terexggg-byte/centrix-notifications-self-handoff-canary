@@ -41,6 +41,20 @@ export function canaryEvidence(value) {
   return out;
 }
 
+export function eventPilotEvidence(value) {
+  if(value==null)return null;
+  if(!['NOT_ARMED','READY','CONSUMED','SUBMITTED','UNKNOWN','FAILED','SERVER_ACK','DELIVERED','READ'].includes(value.status))throw Error('Invalid event pilot state');
+  const out={status:value.status};
+  for(const k of ['providerCallCount','providerAttemptCount'])if(value[k]!=null){out[k]=integer(value[k],k);if(out[k]>1)throw Error('QA_EVENT_PILOT_ATTEMPT_LIMIT');}
+  for(const k of ['pilotId','eventId','deliveryId','centerId','sessionId'])if(value[k]!=null){if(!/^[a-zA-Z0-9_-]{1,100}$/.test(value[k]))throw Error('Invalid event pilot identifier');out[k]=value[k];}
+  for(const k of ['epoch','generation'])if(value[k]!=null)out[k]=integer(value[k],k);
+  if(value.maskedRecipient!=null){if(value.maskedRecipient!=='+20******2924')throw Error('Invalid event recipient mask');out.maskedRecipient=value.maskedRecipient;}
+  for(const k of ['submittedAt','ackAt','deliveredAt','readAt'])if(value[k]!=null){if(!Number.isFinite(Date.parse(value[k])))throw Error('Invalid event time');out[k]=value[k];}
+  if(value.messageIdHash!=null){if(!/^[a-f0-9]{64}$/.test(value.messageIdHash))throw Error('Invalid event message hash');out.messageIdHash=value.messageIdHash;}
+  if(value.failureCode!=null){if(!/^[A-Z][A-Z0-9_]{2,80}$/.test(value.failureCode))throw Error('Invalid event failure code');out.failureCode=value.failureCode;}
+  return out;
+}
+
 // Export only operational fields from runner-local HTTP, never raw response/error payloads.
 export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = new Date().toISOString() }) {
   const d = probe?.diagnostics;
@@ -73,6 +87,7 @@ export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = n
     leaseRenewal: timing(d.leaseRenewal, 'lease renewal'), pushPoll: timing(d.pushPoll, 'PUSH poll'),
     authWrites: Object.fromEntries(['active','pending','pendingKeys','maxActive','maxPending','completed','completedKeys','failed','staleRejected','transactionCount','concurrencyLimit','keysPerTransaction'].map(key => [key, integer(d.authWrites?.[key], `auth ${key}`)])),
     qaCanary: canaryEvidence(d.qaCanary),
+    qaEventPilot: eventPilotEvidence(d.qaEventPilot),
     outboundEnabled: d.outboundEnabled === false ? false : true
   };
 }
