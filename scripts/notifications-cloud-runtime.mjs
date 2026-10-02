@@ -22,6 +22,7 @@ export function canaryEvidence(value) {
   if (!['NOT_ARMED','READY','CONSUMED','SUBMITTED','SERVER_ACK','DELIVERED','READ','FAILED','UNKNOWN','EXPIRED'].includes(value.status)
     || value.canaryId !== 'qa-first-live-canary-20261002') throw Error('Invalid QA canary evidence');
   const out = { canaryId: value.canaryId, status: value.status };
+  if (value.transportRetryDisabled != null) { if (typeof value.transportRetryDisabled !== 'boolean') throw Error('Invalid QA retry evidence'); out.transportRetryDisabled = value.transportRetryDisabled; }
   for (const key of ['providerAttemptCount','providerCallCount']) if (value[key] != null) {
     out[key] = integer(value[key], key); if (out[key]>1) throw Error('QA_CANARY_ATTEMPT_LIMIT_VIOLATION');
   }
