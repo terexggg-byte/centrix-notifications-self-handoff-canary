@@ -644,15 +644,24 @@ CROSS JOIN processing
 LEFT JOIN lease ON true;
 `;
 
-export async function readPostgresWatchdogSnapshot({ env = process.env } = {}) {
-  const databaseUrl = required(env.DATABASE_URL, "DATABASE_URL");
+// Prisma-only URI options are not accepted by libpq. Adapt only the read-only
+// psql probe URI; leave the worker's Prisma URL and pool limit untouched.
+export function watchdogPsqlUrl(value) {
+  const url = new URL(required(value, "DATABASE_URL"));
+  if (!["postgres:", "postgresql:"].includes(url.protocol)) throw new Error("Unsupported watchdog database protocol");
+  for (const key of ["connection_limit", "pool_timeout", "schema", "pgbouncer", "statement_cache_size", "socket_timeout"]) url.searchParams.delete(key);
+  return url.href;
+}
+
+export async function readPostgresWatchdogSnapshot({ env = process.env, processImpl = runProcess } = {}) {
+  const databaseUrl = watchdogPsqlUrl(env.DATABASE_URL);
   const leaseId = String(env.NOTIFICATIONS_WORKER_LEASE_ID || "notifications-worker").trim();
   if (!/^[A-Za-z0-9_.:-]+$/.test(leaseId)) {
     throw new Error("NOTIFICATIONS_WORKER_LEASE_ID contains unsupported characters.");
   }
   const psql = String(env.PSQL_BIN || "psql").trim();
   const sql = WATCHDOG_SQL.replace(":'lease_id'", `'${leaseId}'`);
-  const result = await runProcess(psql, [
+  const result = await processImpl(psql, [
     `--dbname=${databaseUrl}`,
     "--no-psqlrc",
     "--set=ON_ERROR_STOP=1",
