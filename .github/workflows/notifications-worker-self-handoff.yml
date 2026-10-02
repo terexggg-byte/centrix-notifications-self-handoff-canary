@@ -61,6 +61,7 @@ jobs:
       WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PUBLIC_KEY }}
       WEB_PUSH_VAPID_PRIVATE_KEY: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_PRIVATE_KEY }}
       WEB_PUSH_VAPID_SUBJECT: ${{ secrets.PRODUCTION_WEB_PUSH_VAPID_SUBJECT }}
+      CENTRIX_QA_CANARY_RECIPIENT: ${{ secrets.CENTRIX_QA_CANARY_RECIPIENT }}
       DATA_SOURCE: prisma
       NODE_ENV: production
       NOTIFICATIONS_WORKER_LOG_LEVEL: info
@@ -149,6 +150,13 @@ jobs:
       - name: Verify Phase 1 schema and outbound hold (read only)
         working-directory: centrix-rc
         run: npm run verify:whatsapp-phase1
+
+      - name: Verify permanent protection and fixed QA canary schema (read-only)
+        working-directory: centrix-rc
+        run: |
+          node scripts/verify-whatsapp-phase1.mjs
+          node scripts/verify-whatsapp-auth-protection.mjs
+          node scripts/verify-whatsapp-qa-canary.mjs
 
       - name: Wait for predecessor lease expiration
         run: node scripts/notifications-self-handoff.mjs gate

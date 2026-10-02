@@ -9,3 +9,4 @@ process.on('SIGTERM', () => {
   }, Number(process.env.TEST_WORKER_STOP_MS || 30));
 });
 setInterval(() => {}, 1000);
+process.send?.({type:'test.worker_ready'});

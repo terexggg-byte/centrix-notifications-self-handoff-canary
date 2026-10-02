@@ -17,6 +17,29 @@ function timing(metric, name) {
     lastSuccessAt: Number.isFinite(Date.parse(metric.lastSuccessAt)) ? metric.lastSuccessAt : null };
 }
 
+export function canaryEvidence(value) {
+  if (value == null) return null;
+  if (!['NOT_ARMED','READY','CONSUMED','SUBMITTED','SERVER_ACK','DELIVERED','READ','FAILED','UNKNOWN','EXPIRED'].includes(value.status)
+    || value.canaryId !== 'qa-first-live-canary-20261002') throw Error('Invalid QA canary evidence');
+  const out = { canaryId: value.canaryId, status: value.status };
+  for (const key of ['providerAttemptCount','providerCallCount']) if (value[key] != null) {
+    out[key] = integer(value[key], key); if (out[key]>1) throw Error('QA_CANARY_ATTEMPT_LIMIT_VIOLATION');
+  }
+  for (const key of ['epoch','generation']) if (value[key]!=null) out[key]=integer(value[key],key);
+  for (const key of ['centerId','sessionId']) if (value[key]!=null) {
+    const exact = key==='centerId'?'cmswc4i4f0071ytaago69eyu6':'cmswcsk2j000zfwwl1bmpmd3r';
+    if(value[key]!==exact) throw Error('Invalid QA canary identity'); out[key]=value[key];
+  }
+  if (value.maskedRecipient!=null) { if(value.maskedRecipient!=='+20******2924') throw Error('Invalid recipient mask'); out.maskedRecipient=value.maskedRecipient; }
+  for(const key of ['consumedAt','capabilityDisabledAt','providerAttemptedAt','submittedAt','ackAt','deliveredAt','readAt'])
+    if(value[key]!=null){ if(!Number.isFinite(Date.parse(value[key]))) throw Error('Invalid canary time');out[key]=value[key]; }
+  for(const key of ['providerMessageIdHash','attemptMessageIdHash']) if(value[key]!=null) {
+    if(!/^[a-f0-9]{64}$/.test(value[key])) throw Error('Invalid canary ID hash');out[key]=value[key];
+  }
+  if(value.failureCode!=null){if(!/^[A-Z][A-Z0-9_]{2,80}$/.test(value.failureCode)) throw Error('Invalid canary failure code');out.failureCode=value.failureCode;}
+  return out;
+}
+
 // Export only operational fields from runner-local HTTP, never raw response/error payloads.
 export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = new Date().toISOString() }) {
   const d = probe?.diagnostics;
@@ -48,6 +71,7 @@ export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = n
     databaseErrorCounts: Object.fromEntries(['P2024', 'P2028', 'P2032', 'P2021', 'P2022'].map(code => [code, integer(d.databaseErrorCounts?.[code], code)])),
     leaseRenewal: timing(d.leaseRenewal, 'lease renewal'), pushPoll: timing(d.pushPoll, 'PUSH poll'),
     authWrites: Object.fromEntries(['active','pending','pendingKeys','maxActive','maxPending','completed','completedKeys','failed','staleRejected','transactionCount','concurrencyLimit','keysPerTransaction'].map(key => [key, integer(d.authWrites?.[key], `auth ${key}`)])),
+    qaCanary: canaryEvidence(d.qaCanary),
     outboundEnabled: d.outboundEnabled === false ? false : true
   };
 }

@@ -1,5 +1,5 @@
 {
-  "release": "a0d000a885bd9a4624e28956ed50e50dfff63436",
+  "release": "89f570cac6edd26ba4614f03f30c079a61ac4db2",
   "orchestration": [
     "scripts/notifications-self-handoff.mjs",
     "scripts/notifications-worker-lease-status.mjs",
@@ -11,7 +11,7 @@
   "application": {
     "package.json": "77dd3b17b713e17d91d376bc0470a8dc5c42a2eb2bcf162c2c3b66aff2e1cab8",
     "scripts/render-notifications-worker.mjs": "9687693b96df426ba063b78c788cb9db65cd2b30e09d5c0557eb4f09361bbc69",
-    "scripts/notifications-worker.mjs": "b21765311dcc68c17c0b6374babe6191d31a445c0b99d288ac3ea23569d231ee",
+    "scripts/notifications-worker.mjs": "e30bcfb09bfa60fe9249b36309d8437d1d765ec7175fd3926a538e80b52bf169",
     "scripts/notifications-worker-runtime.mjs": "b85cb8082ceca82f2f022b4806dd67c1997c86207c01bb656c852b4579428e14",
     "scripts/notifications-worker-postgres-lease.mjs": "5db371c2692472bac50a3bcb9f65fff803bcbe341efdc8d1e4d2ca3c46a0e694",
     "scripts/whatsapp-readiness.mjs": "0c320232657d17bd33d7ca0225cb6948f33fe3b62a6b0022eaee3de373acafa6",
@@ -20,6 +20,17 @@
     "lib/server/whatsapp-ownership.mjs": "368c93959e5565d01e6bef3bc0077e7a105f464e2dfca68769e2fa1e7511f63c",
     "scripts/whatsapp-prisma-auth.mjs": "908fcb5578ca79d96e81949cf6e62716d49406c378daa649a5f4fa67d82fe65b",
     "scripts/notifications-database-metrics.mjs": "2a0872b5bb6dea691ecbbaa2ab3bced72dfaac39d08f0f7e7d994445ba006adc",
-    "lib/server/notification-worker-health.mjs": "ab0237a0ad6b1cba7cd178b9240e2dc4f321891f116c68a96ccaabbfcae024a5"
+    "lib/server/notification-worker-health.mjs": "7f69ef11d8a01e3a3cc537f80bfb94a91f4479356ee0b31f386d1f0397ef97fa",
+    "package-lock.json": "2b617d6a2d0f69424f90f68d79d23e59ea326b8be24f9714739df2f5b921ea8a",
+    "prisma/schema.prisma": "8b403cabd4cf6f2c25c0bc502767734dd533d2d6954e395d734eeda1a66a803e",
+    "scripts/whatsapp-qa-canary.mjs": "e9a7067f58f195bde771993d64f18d0cac3b8a66eb7e34dba9730c4c4f40eb3e",
+    "scripts/whatsapp-qa-canary-store.mjs": "cd104b1ea56d2ba3b73e3ef8eacdd253df66ad67d6f4e0a46cbd7ccccf5df1df",
+    "scripts/verify-whatsapp-qa-canary.mjs": "ffdb88a30baaa1564f675b53c4db25a43074ff4881629b9bf26f26586688ae9e",
+    "scripts/verify-whatsapp-auth-protection.mjs": "2febe3cef62e00f595d28288962f780bf18d8b1aedbb4d5414ab1f476224a0dd",
+    "scripts/verify-whatsapp-phase1.mjs": "11415c353746682dbed76ecf8c0f4201586dcaaa8a5942cc6a58e48887c5d0af",
+    "prisma/migrations/20260928000100_whatsapp_phase1_fencing/migration.sql": "b2829c2a8b0c9bfef4513ff079233aa9f0ce2c0f2b0a94d70a02c323b565c762",
+    "prisma/migrations/20261002000100_whatsapp_permanent_auth_protection/migration.sql": "8c8895c48243ab61d71a3979a8b8ad0e939834d8793e29ecf855461f899255da",
+    "prisma/migrations/20261002000200_whatsapp_relink_execution_acl/migration.sql": "191f0f6decc5e14aeccfcd4c4b9f79102b5cbf635af276bd5b2be4c1b4059af2",
+    "prisma/migrations/20261002000300_whatsapp_qa_oneshot_canary/migration.sql": "1b4ff6653291a093e7933af7f7888f2f0139ae8a7c510e8f619f49f0ef03fcb6"
   }
 }
