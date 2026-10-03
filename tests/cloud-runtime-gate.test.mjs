@@ -1,5 +1,5 @@
 import test from'node:test';import assert from'node:assert/strict';import{fork}from'node:child_process';import{readFile}from'node:fs/promises';
-import{directEvidence,canaryEvidence,retirementMatches,requestRetirement,CloudRuntimeChannel,EVIDENCE_CHECK,RUNTIME_PROTOCOL}from'../scripts/notifications-cloud-runtime.mjs';
+import{directEvidence,canaryEvidence,existingDeliveryEvidence,retirementMatches,requestRetirement,CloudRuntimeChannel,EVIDENCE_CHECK,RUNTIME_PROTOCOL}from'../scripts/notifications-cloud-runtime.mjs';
 import{lifecycleObserver,childProcessIds,stopRuntimeChild}from'../scripts/notifications-runtime-process.mjs';
 const uuid='aabbccdd-1234-4567-8901-abcdefabcdef',revision='9'.repeat(40),orch='8'.repeat(40);
 const env={NOTIFICATIONS_WORKER_INSTANCE_ID:'gha-7-1',GITHUB_RUN_ID:'7',RELEASE_SHA:revision,SELF_HANDOFF_ORCHESTRATOR_SHA:orch};
@@ -31,4 +31,11 @@ test('QA event evidence exports no phones or free payload and refuses attempt >1
  const v=eventPilotEvidence({pilotId:'qa-attendance-event-pilot-20261003',status:'SUBMITTED',providerAttemptCount:1,providerCallCount:1,maskedRecipient:'+20******2924',phone:'must-not-export',text:'must-not-export'});
  assert.equal(v.status,'SUBMITTED');assert.doesNotMatch(JSON.stringify(v),/must-not-export|"phone"|"text"/);
  assert.throws(()=>eventPilotEvidence({...v,providerCallCount:2}));assert.throws(()=>eventPilotEvidence({...v,maskedRecipient:'full-recipient'}));
+});
+
+test('existing delivery evidence binds fixed target and exports no free payload',()=>{
+ const v=existingDeliveryEvidence({status:'NOT_ARMED',providerCallCount:0,capabilityId:'qa-existing-attendance-delivery-20261003',deliveryId:'cmuspn8az005u6qpy8w7wskyf',phone:'must-not-export',message:'must-not-export'});
+ assert.equal(v.providerCallCount,0);assert.doesNotMatch(JSON.stringify(v),/must-not-export|"phone"|"message"/);
+ assert.throws(()=>existingDeliveryEvidence({...v,deliveryId:'other'}));
+ assert.throws(()=>existingDeliveryEvidence({...v,providerAttemptCount:2}));
 });

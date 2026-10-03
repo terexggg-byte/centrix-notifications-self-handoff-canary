@@ -55,6 +55,17 @@ export function eventPilotEvidence(value) {
   return out;
 }
 
+export function existingDeliveryEvidence(value) {
+  if(value==null)return null;
+  const out=eventPilotEvidence(value);
+  if(value.capabilityId!=null){
+    if(value.capabilityId!=='qa-existing-attendance-delivery-20261003')throw Error('Invalid existing delivery capability');
+    out.capabilityId=value.capabilityId;
+  }
+  if(value.deliveryId!=null&&value.deliveryId!=='cmuspn8az005u6qpy8w7wskyf')throw Error('Invalid existing target delivery');
+  return out;
+}
+
 // Export only operational fields from runner-local HTTP, never raw response/error payloads.
 export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = new Date().toISOString() }) {
   const d = probe?.diagnostics;
@@ -103,6 +114,7 @@ export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = n
     authWrites: Object.fromEntries(['active','pending','pendingKeys','maxActive','maxPending','completed','completedKeys','failed','staleRejected','transactionCount','concurrencyLimit','keysPerTransaction'].map(key => [key, integer(d.authWrites?.[key], `auth ${key}`)])),
     qaCanary: canaryEvidence(d.qaCanary),
     qaEventPilot: eventPilotEvidence(d.qaEventPilot),
+    existingDeliveryCapability: existingDeliveryEvidence(d.existingDeliveryCapability),
     outboundEnabled: d.outboundEnabled === false ? false : true
   };
 }

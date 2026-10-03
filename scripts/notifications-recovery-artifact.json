@@ -1,5 +1,5 @@
 {
-  "release": "505285c5bddf8478ca71223cf06b67fb4469b30f",
+  "release": "b7319f01c58f46cace6b06fe8293ba46fca35e5d",
   "orchestration": [
     "scripts/notifications-self-handoff.mjs",
     "scripts/notifications-worker-lease-status.mjs",
@@ -23,7 +23,7 @@
     "lib/server/attendance-write.ts": "496455594eea9d2b46dc4d23e926e85f92697ac187ba98768ec66416be05dece",
     "lib/server/notification-events.ts": "9adb8987bd705adaa232be55cbfab4ca731a128783cb5acac8cb9633f598f3ca",
     "lib/server/notification-service.ts": "96e0d5db71c50f3036128eba09fee6141392e1039a99c1076304e1901cc4a196",
-    "lib/server/notification-worker-health.mjs": "0b5e2fadbd9465d89457f8c9a429779c6c23c1f4ba7cb5358654491e5ff6bfbb",
+    "lib/server/notification-worker-health.mjs": "dc32a4e54ccef233f2dad0acf46ae9058ba9e35e081d5c87550bab7aae75ba65",
     "lib/server/parent-portal-notification-core.mjs": "523ac0a3ebd1006a5d62dd2ddacad8e6f994e581294c7ed85f64331df61213d8",
     "lib/server/qa-attendance-pilot.ts": "93283854f2e08d4621268487b2e3523b1190bbe93e67315ee1f239d3fbe204e9",
     "lib/server/request-context.ts": "04596e3b627b387c66f7fe08a3bb905967ec3f23633561cc5531f8b4df1c66e5",
@@ -43,22 +43,26 @@
     "prisma/migrations/20261003000200_attendance_notification_outbox/migration.sql": "c748462a1afc4311af743ff0bf31d81f5fb9d2a2c28a915155e223395f6eb492",
     "prisma/migrations/20261003000300_attendance_outbox_quarantine/migration.sql": "bf26b974990f63f8091a408610cd58a49af3e34d6a299f477b2eb80d26ff7308",
     "prisma/migrations/20261003000400_center_delivery_sender_scope/migration.sql": "aff60c3d2ba158ce06fd74c477bf33cb0cb2aecb9b3cedd27f1830fe87668f01",
-    "prisma/schema.prisma": "0fe8c0ef218366046de366702a791618640b82808849355930e2d16a51bd1fd6",
+    "prisma/migrations/20261003000500_existing_delivery_capability/migration.sql": "cf1a61dc67add0ae7531efe94677c1c12d17cd71777956b9c76d8bfcaf3ad403",
+    "prisma/schema.prisma": "fe98e78253ed994b6641e64a174c7f7cfe020006eb07880219122778506dfd61",
     "scripts/attendance-outbox-runtime-metadata.mjs": "0f0b2bcb43c7a7cb11e3b5d3e7c32f85120b46f5c3e589f123f53e7f63d8c340",
     "scripts/build-attendance-outbox-runtime.mjs": "6985a8191f5d8f5af695b032b956b6cc127d25ac332721682bb65c2f33f91750",
     "scripts/fixtures/center-delivery-sender-guards.json": "a098eeb67cad26a41aa5937253720ca2dfee11235385ea95f5a5bd40200b15e8",
     "scripts/notifications-database-metrics.mjs": "2a0872b5bb6dea691ecbbaa2ab3bced72dfaac39d08f0f7e7d994445ba006adc",
     "scripts/notifications-worker-postgres-lease.mjs": "5db371c2692472bac50a3bcb9f65fff803bcbe341efdc8d1e4d2ca3c46a0e694",
     "scripts/notifications-worker-runtime.mjs": "b85cb8082ceca82f2f022b4806dd67c1997c86207c01bb656c852b4579428e14",
-    "scripts/notifications-worker.mjs": "427787f56b2c690f44682a93252365b066d1b25083b720e6562038ae80b1201e",
+    "scripts/notifications-worker.mjs": "93ba972b414beecd4404d4622e32ea3fb01c4c5a3c1fcb3e7cc6e422db43d045",
     "scripts/render-notifications-worker.mjs": "9687693b96df426ba063b78c788cb9db65cd2b30e09d5c0557eb4f09361bbc69",
     "scripts/verify-attendance-outbox.mjs": "965a759c0186ec94893c7b18bcad43d9464ab1de1ecfcbd722f983c79481ee59",
     "scripts/verify-card-request-database.mjs": "71119a203023db354ee214ce3e9e19dc3c7d55d258b36f81006b3f28baee4d44",
+    "scripts/verify-existing-delivery-capability.mjs": "5cabaaa3a9cd23fda7d8a562147b37da6afc535a39623254728f9f99ec7c7f9e",
     "scripts/verify-whatsapp-auth-protection.mjs": "2febe3cef62e00f595d28288962f780bf18d8b1aedbb4d5414ab1f476224a0dd",
     "scripts/verify-whatsapp-phase1.mjs": "11415c353746682dbed76ecf8c0f4201586dcaaa8a5942cc6a58e48887c5d0af",
     "scripts/verify-whatsapp-qa-canary.mjs": "ffdb88a30baaa1564f675b53c4db25a43074ff4881629b9bf26f26586688ae9e",
     "scripts/verify-whatsapp-qa-event-pilot.mjs": "66842c6e698504e475df60e04b6c227291b9e552311eccd821d35e46888d0615",
     "scripts/whatsapp-cloud-health.mjs": "b48fb40b99b0942fc68d6db1a5ddd190fa44ad1670314b6d15670aba511e0656",
+    "scripts/whatsapp-existing-delivery-capability.mjs": "7f2b09f7681b53f20a8d8477e1bc3daf5f02b102ca4cc7a30bfcd808cbdcbdaf",
+    "scripts/whatsapp-existing-delivery-store.mjs": "9334f6e6f43d10496ac6a22e13473a37140815f028b8ac0e116bfc7a7114ddb1",
     "scripts/whatsapp-prisma-auth.mjs": "908fcb5578ca79d96e81949cf6e62716d49406c378daa649a5f4fa67d82fe65b",
     "scripts/whatsapp-qa-canary-store.mjs": "cd104b1ea56d2ba3b73e3ef8eacdd253df66ad67d6f4e0a46cbd7ccccf5df1df",
     "scripts/whatsapp-qa-canary.mjs": "9262f58389c950cfd8562d489a8cf01884c253f10fc9ab1d2a02144169eeae59",
@@ -66,6 +70,7 @@
     "scripts/whatsapp-qa-event-pilot.mjs": "a4bb4eb0268917d7b52e986fb4a6cd8f6e97ebc5a2ce43ca5c72740ac1be4b53",
     "scripts/whatsapp-readiness.mjs": "0c320232657d17bd33d7ca0225cb6948f33fe3b62a6b0022eaee3de373acafa6",
     "scripts/whatsapp-session-runtime.mjs": "e60903719774351d06d6edf30fc0001435c34b0968bca18ffdcc312c54cc17b1",
-    "tests/attendance-outbox-contract.test.mjs": "9c0a9d9414885e92e10c1a34d72dc92babf0f1b0b39455bd3c1a2433cd216b72"
+    "tests/attendance-outbox-contract.test.mjs": "9c0a9d9414885e92e10c1a34d72dc92babf0f1b0b39455bd3c1a2433cd216b72",
+    "tests/existing-delivery-capability.test.mjs": "c9913cdfb67a699407095f1fb462b534830a44fa6fec876f01bf99a66c747c18"
   }
 }

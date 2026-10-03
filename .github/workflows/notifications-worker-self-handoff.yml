@@ -138,6 +138,10 @@ jobs:
         working-directory: centrix-rc
         run: node --test tests/whatsapp-auth-writer.test.mjs
 
+      - name: Test fixed existing-delivery capability with mock provider only
+        working-directory: centrix-rc
+        run: node --test tests/existing-delivery-capability.test.mjs
+
       - name: Test applied Phase 1 orchestration and health probes
         env:
           CENTRIX_ORCHESTRATOR_MODULE: ${{ github.workspace }}/scripts/notifications-self-handoff.mjs
@@ -165,6 +169,7 @@ jobs:
           node scripts/verify-whatsapp-qa-canary.mjs
           node scripts/verify-whatsapp-qa-event-pilot.mjs
           node scripts/verify-attendance-outbox.mjs
+          node scripts/verify-existing-delivery-capability.mjs
 
       - name: Wait for predecessor lease expiration
         run: node scripts/notifications-self-handoff.mjs gate
