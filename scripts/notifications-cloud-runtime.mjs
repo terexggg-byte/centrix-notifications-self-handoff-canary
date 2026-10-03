@@ -85,6 +85,13 @@ export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = n
     errorCodeCounts: Object.fromEntries(['P2032', 'P2021', 'P2022'].map(code => [code, integer(d.errorCodeCounts?.[code], code)])),
     databaseErrorCounts: Object.fromEntries(['P2024', 'P2028', 'P2032', 'P2021', 'P2022'].map(code => [code, integer(d.databaseErrorCounts?.[code], code)])),
     leaseRenewal: timing(d.leaseRenewal, 'lease renewal'), pushPoll: timing(d.pushPoll, 'PUSH poll'),
+    attendanceOutbox: d.attendanceOutbox ? {
+      successCount: integer(d.attendanceOutbox.successCount, 'outbox successes'),
+      errorCount: integer(d.attendanceOutbox.errorCount, 'outbox errors'),
+      materializedCount: integer(d.attendanceOutbox.materializedCount, 'outbox materialized'),
+      maxTransactionMs: Number(d.attendanceOutbox.maxTransactionMs) || 0,
+      inFlight: d.attendanceOutbox.inFlight === true
+    } : null,
     authWrites: Object.fromEntries(['active','pending','pendingKeys','maxActive','maxPending','completed','completedKeys','failed','staleRejected','transactionCount','concurrencyLimit','keysPerTransaction'].map(key => [key, integer(d.authWrites?.[key], `auth ${key}`)])),
     qaCanary: canaryEvidence(d.qaCanary),
     qaEventPilot: eventPilotEvidence(d.qaEventPilot),

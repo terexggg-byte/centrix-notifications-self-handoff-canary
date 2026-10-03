@@ -128,7 +128,7 @@ jobs:
 
       - name: Install immutable release dependencies
         working-directory: centrix-rc
-        run: npm ci
+        run: npm ci --include=dev
 
       - name: Test worker runtime
         working-directory: centrix-rc
@@ -147,6 +147,12 @@ jobs:
         working-directory: centrix-rc
         run: npm run prisma:generate
 
+      - name: Compile and verify immutable attendance outbox runtime
+        working-directory: centrix-rc
+        run: |
+          npm run notifications:runtime:build
+          node --test tests/attendance-outbox-contract.test.mjs
+
       - name: Verify Phase 1 schema and outbound hold (read only)
         working-directory: centrix-rc
         run: npm run verify:whatsapp-phase1
@@ -158,6 +164,7 @@ jobs:
           node scripts/verify-whatsapp-auth-protection.mjs
           node scripts/verify-whatsapp-qa-canary.mjs
           node scripts/verify-whatsapp-qa-event-pilot.mjs
+          node scripts/verify-attendance-outbox.mjs
 
       - name: Wait for predecessor lease expiration
         run: node scripts/notifications-self-handoff.mjs gate
