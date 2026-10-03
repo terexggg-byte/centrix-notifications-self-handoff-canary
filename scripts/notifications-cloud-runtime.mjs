@@ -90,7 +90,15 @@ export function directEvidence({ probe, env, wrapperPid, workerPids = [], at = n
       errorCount: integer(d.attendanceOutbox.errorCount, 'outbox errors'),
       materializedCount: integer(d.attendanceOutbox.materializedCount, 'outbox materialized'),
       maxTransactionMs: Number(d.attendanceOutbox.maxTransactionMs) || 0,
-      inFlight: d.attendanceOutbox.inFlight === true
+      inFlight: d.attendanceOutbox.inFlight === true,
+      healthy: d.attendanceOutbox.healthy === true,
+      degraded: d.attendanceOutbox.degraded === true,
+      blockedCount: integer(d.attendanceOutbox.blockedCount, 'outbox blocked'),
+      recentErrorCount: integer(d.attendanceOutbox.recentErrorCount, 'outbox recent errors'),
+      oldestPendingAge: d.attendanceOutbox.oldestPendingAge == null ? null : Number(d.attendanceOutbox.oldestPendingAge),
+      lastFailureStage: d.attendanceOutbox.lastFailureStage,
+      lastFailureCode: d.attendanceOutbox.lastFailureCode,
+      runtime: d.attendanceOutbox.runtime ? Object.fromEntries(['nodeVersion','prismaVersion','dataSource','production','sourceManifestDigest','sourcesMatch','serviceSourceDigest','serviceCompiledDigest','processorCompiledDigest','generatedSchemaDigest','waitingSessionEnumPresent','deliveryFieldsPresent','outboxPolicyFieldsPresent'].map(key => [key, d.attendanceOutbox.runtime[key]])) : null
     } : null,
     authWrites: Object.fromEntries(['active','pending','pendingKeys','maxActive','maxPending','completed','completedKeys','failed','staleRejected','transactionCount','concurrencyLimit','keysPerTransaction'].map(key => [key, integer(d.authWrites?.[key], `auth ${key}`)])),
     qaCanary: canaryEvidence(d.qaCanary),
